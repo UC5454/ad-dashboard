@@ -26,15 +26,23 @@ export function encrypt(plaintext: string): string {
 
 export function decrypt(encryptedData: string): string {
   const key = getEncryptionKey();
-  const [ivHex, authTagHex, encrypted] = encryptedData.split(":");
+  const parts = encryptedData.split(":");
+  if (parts.length !== 3) {
+    throw new Error("Invalid encrypted data format");
+  }
+  const [ivHex, authTagHex, encrypted] = parts;
 
-  const iv = Buffer.from(ivHex, "hex");
-  const authTag = Buffer.from(authTagHex, "hex");
-  const decipher = createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(authTag);
+  try {
+    const iv = Buffer.from(ivHex, "hex");
+    const authTag = Buffer.from(authTagHex, "hex");
+    const decipher = createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(authTag);
 
-  let decrypted = decipher.update(encrypted, "hex", "utf8");
-  decrypted += decipher.final("utf8");
+    let decrypted = decipher.update(encrypted, "hex", "utf8");
+    decrypted += decipher.final("utf8");
 
-  return decrypted;
+    return decrypted;
+  } catch (e) {
+    throw new Error("Failed to decrypt data: corrupted or wrong key");
+  }
 }

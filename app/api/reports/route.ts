@@ -44,6 +44,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "clientId and period required" }, { status: 400 });
   }
 
+  if (!/^\d{4}-\d{2}$/.test(period)) {
+    return NextResponse.json({ error: "period must be YYYY-MM format" }, { status: 400 });
+  }
+
   const db = getDb();
 
   // Client info
@@ -129,6 +133,10 @@ export async function POST(request: NextRequest) {
 
   if (!clientId || !period) {
     return NextResponse.json({ error: "clientId and period required" }, { status: 400 });
+  }
+
+  if (!/^\d{4}-\d{2}$/.test(period)) {
+    return NextResponse.json({ error: "period must be YYYY-MM format" }, { status: 400 });
   }
 
   const db = getDb();

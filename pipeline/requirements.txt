@@ -1,0 +1,5 @@
+google-ads==25.1.0
+facebook-business==22.0.0
+pyyaml==6.0.2
+requests==2.32.3
+python-dotenv==1.0.1

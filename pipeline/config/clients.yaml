@@ -1,0 +1,11 @@
+# クライアント設定（例）
+# APIキーはWeb UIから登録する
+# ここではアカウントIDとクライアント名のマッピングのみ
+
+clients: []
+# Example:
+# - name: "サンプルクライアント"
+#   google_ads_account_id: "123-456-7890"
+#   meta_ads_account_id: "act_123456789"
+#   monthly_budget_google: 500000
+#   monthly_budget_meta: 300000

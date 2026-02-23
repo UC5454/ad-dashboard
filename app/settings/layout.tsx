@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import AppShell from "@/components/layout/AppShell";
 
-export default async function DashboardLayout({
+export default async function SettingsLayout({
   children,
 }: {
   children: React.ReactNode;

@@ -47,6 +47,16 @@ interface DashboardResponse {
 }
 
 type ChartMetric = "cost" | "cv" | "cpa";
+type SortKey =
+  | "name"
+  | "budget"
+  | "total_cost"
+  | "budget_pct"
+  | "total_conversions"
+  | "avg_cpa"
+  | "avg_roas"
+  | "avg_ctr"
+  | "status";
 
 function formatCurrency(value: number): string {
   return `¥${Math.round(value).toLocaleString()}`;
@@ -111,7 +121,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartMetric, setChartMetric] = useState<ChartMetric>("cost");
-  const [sortKey, setSortKey] = useState<string>("total_cost");
+  const [sortKey, setSortKey] = useState<SortKey>("total_cost");
   const [sortAsc, setSortAsc] = useState(false);
 
   useEffect(() => {
@@ -137,6 +147,23 @@ export default function DashboardPage() {
   }
 
   const { kpi, clients, dailyTrend } = data;
+
+  const getSortValue = (client: ClientData, key: SortKey): string | number => {
+    switch (key) {
+      case "name":
+        return client.name;
+      case "budget":
+        return client.monthly_budget_google + client.monthly_budget_meta;
+      case "budget_pct": {
+        const totalBudget = client.monthly_budget_google + client.monthly_budget_meta;
+        return totalBudget > 0 ? (client.total_cost / totalBudget) * 100 : 0;
+      }
+      case "status":
+        return client.status;
+      default:
+        return client[key];
+    }
+  };
 
   // KPI cards
   const kpiCards = [
@@ -165,12 +192,16 @@ export default function DashboardPage() {
 
   // Sort clients
   const sortedClients = [...clients].sort((a, b) => {
-    const aVal = (a as Record<string, unknown>)[sortKey] as number;
-    const bVal = (b as Record<string, unknown>)[sortKey] as number;
+    const aVal = getSortValue(a, sortKey);
+    const bVal = getSortValue(b, sortKey);
+    if (typeof aVal === "string" || typeof bVal === "string") {
+      const result = String(aVal).localeCompare(String(bVal), "ja");
+      return sortAsc ? result : -result;
+    }
     return sortAsc ? aVal - bVal : bVal - aVal;
   });
 
-  const handleSort = (key: string) => {
+  const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortAsc(!sortAsc);
     } else {
@@ -228,7 +259,7 @@ export default function DashboardPage() {
                 ].map((col) => (
                   <th
                     key={col.key}
-                    onClick={() => handleSort(col.key)}
+                    onClick={() => handleSort(col.key as SortKey)}
                     className="cursor-pointer px-4 py-3 hover:text-navy"
                   >
                     {col.label}
@@ -315,17 +346,24 @@ export default function DashboardPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
               <XAxis
                 dataKey="date"
-                tickFormatter={(d: string) => d.slice(5)}
+                tickFormatter={(date: string | number | undefined) =>
+                  String(date ?? "").slice(5)
+                }
                 tick={{ fontSize: 12, fill: "#6B7280" }}
               />
               <YAxis
-                tickFormatter={(v: number) => chartFormatter(v)}
+                tickFormatter={(value: number | undefined) =>
+                  chartFormatter(value ?? 0)
+                }
                 tick={{ fontSize: 12, fill: "#6B7280" }}
                 width={80}
               />
               <Tooltip
-                formatter={(v: number) => [chartFormatter(v), chartLabel]}
-                labelFormatter={(l: string) => `${l}`}
+                formatter={(value: number | undefined) => [
+                  chartFormatter(value ?? 0),
+                  chartLabel,
+                ]}
+                labelFormatter={(label) => String(label ?? "")}
               />
               <Line
                 type="monotone"

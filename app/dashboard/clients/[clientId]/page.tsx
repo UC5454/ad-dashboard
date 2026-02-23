@@ -178,10 +178,30 @@ export default function ClientDetailPage() {
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={dailyTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(5)} tick={{ fontSize: 12 }} />
-              <YAxis yAxisId="left" tickFormatter={(v: number) => fmt(v)} tick={{ fontSize: 12 }} width={80} />
+              <XAxis
+                dataKey="date"
+                tickFormatter={(date: string | number | undefined) => String(date ?? "").slice(5)}
+                tick={{ fontSize: 12 }}
+              />
+              <YAxis
+                yAxisId="left"
+                tickFormatter={(value: number | undefined) => fmt(value ?? 0)}
+                tick={{ fontSize: 12 }}
+                width={80}
+              />
               <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} width={40} />
-              <Tooltip formatter={(v: number, name: string) => [name === "conversions" ? v : fmt(v), name === "cost" ? "消化額" : name === "conversions" ? "CV" : "CPA"]} />
+              <Tooltip
+                formatter={(value: number | undefined, name: string | undefined) => {
+                  const numericValue = value ?? 0;
+                  if (name === "conversions") {
+                    return [numericValue.toLocaleString("ja-JP"), "CV"];
+                  }
+                  if (name === "cost") {
+                    return [fmt(numericValue), "消化額"];
+                  }
+                  return [fmt(numericValue), "CPA"];
+                }}
+              />
               <Legend />
               <Line yAxisId="left" type="monotone" dataKey="cost" stroke="#2C5282" strokeWidth={2} name="消化額" dot={false} />
               <Line yAxisId="right" type="monotone" dataKey="conversions" stroke="#38A169" strokeWidth={2} name="CV" dot={false} />

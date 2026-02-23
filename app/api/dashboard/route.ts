@@ -47,13 +47,15 @@ export async function GET(request: NextRequest) {
   let prevEndDate: string;
 
   if (period === "current_month") {
-    startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-    endDate = now.toISOString().split("T")[0];
-    // Previous month
-    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    prevStartDate = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, "0")}-01`;
-    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-    prevEndDate = prevMonthEnd.toISOString().split("T")[0];
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0-indexed
+    startDate = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    endDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    // Previous month (handles year boundary correctly)
+    const prevMonthFirst = new Date(year, month - 1, 1);
+    const prevMonthLast = new Date(year, month, 0);
+    prevStartDate = `${prevMonthFirst.getFullYear()}-${String(prevMonthFirst.getMonth() + 1).padStart(2, "0")}-01`;
+    prevEndDate = `${prevMonthLast.getFullYear()}-${String(prevMonthLast.getMonth() + 1).padStart(2, "0")}-${String(prevMonthLast.getDate()).padStart(2, "0")}`;
   } else {
     // Default to last 30 days
     const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);

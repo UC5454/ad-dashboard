@@ -41,6 +41,12 @@ export async function PATCH(request: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const role = ((session as any).user?.role as string) || "viewer";
+  if (role === "viewer") {
+    return NextResponse.json({ error: "Forbidden: viewer cannot resolve alerts" }, { status: 403 });
+  }
+
   const body = await request.json();
   const { id } = body;
 

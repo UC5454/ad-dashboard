@@ -24,12 +24,17 @@ function isMainActive(pathname: string, href: string): boolean {
   return pathname.startsWith(href);
 }
 
-export default function Sidebar() {
+interface SidebarProps {
+  open?: boolean;
+  onClose?: () => void;
+}
+
+export default function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
 
   return (
-    <aside className="fixed left-0 top-0 flex h-screen w-64 flex-col bg-navy text-white">
+    <aside className={`fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-navy text-white transition-transform md:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="border-b border-navy-light px-5 py-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue text-sm font-bold">
@@ -51,6 +56,7 @@ export default function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={onClose}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                   active
                     ? "bg-blue text-white"
@@ -72,6 +78,7 @@ export default function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={onClose}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                   active
                     ? "bg-blue text-white"

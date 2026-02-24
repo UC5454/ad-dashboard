@@ -32,3 +32,41 @@ export interface MetaCampaignInsights extends MetaInsights {
   campaign_id: string;
   campaign_name: string;
 }
+
+export interface MetaAdsetInsights extends MetaInsights {
+  campaign_id: string;
+  campaign_name: string;
+  adset_id: string;
+  adset_name: string;
+}
+
+export interface MetaAdInsights extends MetaInsights {
+  campaign_id?: string;
+  campaign_name?: string;
+  adset_id?: string;
+  adset_name?: string;
+  ad_id: string;
+  ad_name: string;
+}
+
+export interface MetaBreakdownInsights extends MetaInsights {
+  age?: string;
+  gender?: string;
+  country?: string;
+  publisher_platform?: string;
+  platform_position?: string;
+  impression_device?: string;
+}
+
+export interface MetaCreativeSummary {
+  ad_id: string;
+  ad_name: string;
+  creative_name: string;
+  thumbnail_url: string | null;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
+}

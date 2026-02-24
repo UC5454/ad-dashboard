@@ -1,4 +1,9 @@
-"""Meta (Facebook) Ads API data fetcher."""
+"""Meta (Facebook) Ads API data fetcher.
+
+SECURITY: このモジュールは読み取り専用（READ-ONLY）。
+広告の作成・編集・削除・予算変更などの書き込み操作は一切行わない。
+使用APIはget_insightsのみ。
+"""
 
 from typing import Any
 
@@ -7,7 +12,11 @@ from facebook_business.adobjects.adaccount import AdAccount
 
 
 class MetaAdsFetcher:
-    """Fetches ad performance data from Meta Marketing API."""
+    """Fetches ad performance data from Meta Marketing API.
+
+    READ-ONLY: This class only reads ad insights.
+    No create/update/delete operations are implemented or allowed.
+    """
 
     ACCOUNT_FIELDS = [
         "impressions",

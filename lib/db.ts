@@ -2,7 +2,10 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 
-const DB_PATH = path.join(process.cwd(), "data", "ad-dashboard.db");
+const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+const DB_PATH = isVercel
+  ? path.join("/tmp", "ad-dashboard.db")
+  : path.join(process.cwd(), "data", "ad-dashboard.db");
 
 let db: Database.Database | null = null;
 

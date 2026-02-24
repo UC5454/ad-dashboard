@@ -1,386 +1,388 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { generateAccountAnalysis } from "@/lib/analysis";
+import type { MetaAccount, MetaAction, MetaCampaignInsights, MetaInsights } from "@/types/meta";
 
-interface KpiData {
-  total_cost: number;
-  total_conversions: number;
-  avg_cpa: number;
-  avg_roas: number;
-}
-
-interface ClientData {
-  id: string;
-  name: string;
-  status: string;
-  monthly_budget_google: number;
-  monthly_budget_meta: number;
-  total_cost: number;
-  total_conversions: number;
-  avg_cpa: number;
-  avg_roas: number;
-  avg_ctr: number;
-}
-
-interface DailyData {
-  date: string;
-  total_cost: number;
-  total_conversions: number;
-  avg_cpa: number;
-}
-
-interface DashboardResponse {
-  kpi: { current: KpiData; previous: KpiData };
-  clients: ClientData[];
-  dailyTrend: DailyData[];
-  period: { startDate: string; endDate: string };
-}
-
-type ChartMetric = "cost" | "cv" | "cpa";
 type SortKey =
-  | "name"
-  | "budget"
-  | "total_cost"
-  | "budget_pct"
-  | "total_conversions"
-  | "avg_cpa"
-  | "avg_roas"
-  | "avg_ctr"
-  | "status";
+  | "campaign_name"
+  | "spend"
+  | "impressions"
+  | "clicks"
+  | "ctr"
+  | "cpc"
+  | "lp_views"
+  | "cv"
+  | "cpa";
+
+interface CampaignRow extends MetaCampaignInsights {
+  lp_views?: number;
+  cv?: number;
+  cpa?: number;
+  calc_cpc?: number;
+}
+
+interface AccountInsightsResponse extends MetaInsights {
+  link_click?: number;
+  landing_page_view?: number;
+  cv?: number;
+}
+
+const presetLabels: Record<string, string> = {
+  today: "今日",
+  yesterday: "昨日",
+  last_7d: "過去7日",
+  last_30d: "過去30日",
+  this_month: "今月",
+};
+
+function actionValue(actions: MetaAction[] | undefined, actionType: string): number {
+  const action = actions?.find((item) => item.action_type === actionType);
+  return action ? Number.parseFloat(action.value || "0") || 0 : 0;
+}
 
 function formatCurrency(value: number): string {
-  return `¥${Math.round(value).toLocaleString()}`;
+  return `¥${Math.round(value).toLocaleString("ja-JP")}`;
 }
 
-function formatNumber(value: number, decimals = 0): string {
-  return value.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
+function formatNumber(value: number): string {
+  return value.toLocaleString("ja-JP");
 }
 
-function calcChange(current: number, previous: number): number {
-  if (previous === 0) return 0;
-  return ((current - previous) / previous) * 100;
+function formatPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
 }
 
-function ChangeIndicator({ value, inverted = false }: { value: number; inverted?: boolean }) {
-  if (value === 0) return <span className="text-xs text-gray-400">--</span>;
-  const isPositive = inverted ? value < 0 : value > 0;
-  return (
-    <span className={`inline-flex items-center text-xs font-medium ${isPositive ? "text-emerald-600" : "text-red-500"}`}>
-      {value > 0 ? "↑" : "↓"} {Math.abs(value).toFixed(1)}%
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    active: "bg-emerald-100 text-emerald-700",
-    paused: "bg-yellow-100 text-yellow-700",
-    archived: "bg-gray-100 text-gray-500",
-  };
-  const labels: Record<string, string> = {
-    active: "アクティブ",
-    paused: "一時停止",
-    archived: "アーカイブ",
-  };
-  return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${styles[status] || styles.archived}`}>
-      {labels[status] || status}
-    </span>
-  );
-}
-
-function BudgetBar({ spent, budget }: { spent: number; budget: number }) {
-  if (budget === 0) return <span className="text-xs text-gray-400">--</span>;
-  const pct = Math.min((spent / budget) * 100, 100);
-  const color =
-    pct > 100 ? "bg-red-500" : pct > 80 ? "bg-yellow-500" : "bg-emerald-500";
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-2 w-20 overflow-hidden rounded-full bg-gray-200">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-      </div>
-      <span className="text-xs text-gray-600">{pct.toFixed(0)}%</span>
-    </div>
-  );
+function getPresetRangeLabel(insights: AccountInsightsResponse | null, datePreset: string): string {
+  if (insights?.date_start && insights?.date_stop) {
+    return `${insights.date_start} 〜 ${insights.date_stop}`;
+  }
+  return presetLabels[datePreset] || datePreset;
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardResponse | null>(null);
+  const router = useRouter();
+
+  const [accountId, setAccountId] = useState<string>("");
+  const [datePreset, setDatePreset] = useState("last_30d");
+  const [accounts, setAccounts] = useState<MetaAccount[]>([]);
+  const [insights, setInsights] = useState<AccountInsightsResponse | null>(null);
+  const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [chartMetric, setChartMetric] = useState<ChartMetric>("cost");
-  const [sortKey, setSortKey] = useState<SortKey>("total_cost");
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("spend");
   const [sortAsc, setSortAsc] = useState(false);
 
   useEffect(() => {
-    fetch("/api/dashboard")
-      .then((r) => r.json())
-      .then((d) => {
-        setData(d);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    let mounted = true;
+
+    const loadAccounts = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch("/api/meta/accounts");
+        if (!res.ok) {
+          throw new Error("アカウントの取得に失敗しました");
+        }
+
+        const data = (await res.json()) as MetaAccount[];
+        if (!mounted) return;
+
+        setAccounts(data);
+        if (data.length > 0) {
+          setAccountId(data[0].id);
+        }
+      } catch (err) {
+        if (mounted) {
+          setError(err instanceof Error ? err.message : "データ取得エラー");
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadAccounts();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!accountId) return;
+
+    let mounted = true;
+
+    const loadDetailData = async () => {
+      setDetailsLoading(true);
+      setError("");
+      try {
+        const [insightsRes, campaignsRes] = await Promise.all([
+          fetch(`/api/meta/insights?account_id=${encodeURIComponent(accountId)}&date_preset=${datePreset}`),
+          fetch(`/api/meta/campaigns?account_id=${encodeURIComponent(accountId)}&date_preset=${datePreset}`),
+        ]);
+
+        if (!insightsRes.ok || !campaignsRes.ok) {
+          throw new Error("指標データの取得に失敗しました");
+        }
+
+        const [insightsData, campaignsData] = await Promise.all([
+          insightsRes.json() as Promise<AccountInsightsResponse | null>,
+          campaignsRes.json() as Promise<CampaignRow[]>,
+        ]);
+
+        if (!mounted) return;
+
+        setInsights(insightsData);
+        setCampaigns(Array.isArray(campaignsData) ? campaignsData : []);
+      } catch (err) {
+        if (mounted) {
+          setError(err instanceof Error ? err.message : "データ取得エラー");
+          setInsights(null);
+          setCampaigns([]);
+        }
+      } finally {
+        if (mounted) {
+          setDetailsLoading(false);
+        }
+      }
+    };
+
+    void loadDetailData();
+
+    return () => {
+      mounted = false;
+    };
+  }, [accountId, datePreset]);
+
+  const selectedAccount = useMemo(
+    () => accounts.find((account) => account.id === accountId) || null,
+    [accountId, accounts],
+  );
+
+  const kpis = useMemo(() => {
+    const spend = Number.parseFloat(insights?.spend || "0") || 0;
+    const impressions = Number.parseFloat(insights?.impressions || "0") || 0;
+    const clicks = Number.parseFloat(insights?.clicks || "0") || 0;
+    const ctr = Number.parseFloat(insights?.ctr || "0") || 0;
+
+    return [
+      { label: "消化金額", value: formatCurrency(spend) },
+      { label: "IMP", value: formatNumber(Math.round(impressions)) },
+      { label: "クリック", value: formatNumber(Math.round(clicks)) },
+      { label: "CTR", value: formatPercent(ctr) },
+    ];
+  }, [insights]);
+
+  const sortedCampaigns = useMemo(() => {
+    const rows = [...campaigns];
+
+    rows.sort((a, b) => {
+      const aVal =
+        sortKey === "campaign_name"
+          ? a.campaign_name
+          : sortKey === "lp_views"
+            ? a.lp_views ?? actionValue(a.actions, "landing_page_view")
+            : sortKey === "cv"
+              ? a.cv ?? actionValue(a.actions, "offsite_conversion.fb_pixel_custom")
+              : sortKey === "cpa"
+                ? a.cpa ?? (a.cv ? (Number.parseFloat(a.spend || "0") || 0) / a.cv : 0)
+                : sortKey === "cpc"
+                  ? a.calc_cpc ?? (Number.parseFloat(a.cpc || "0") || 0)
+                  : Number.parseFloat(String(a[sortKey])) || 0;
+
+      const bVal =
+        sortKey === "campaign_name"
+          ? b.campaign_name
+          : sortKey === "lp_views"
+            ? b.lp_views ?? actionValue(b.actions, "landing_page_view")
+            : sortKey === "cv"
+              ? b.cv ?? actionValue(b.actions, "offsite_conversion.fb_pixel_custom")
+              : sortKey === "cpa"
+                ? b.cpa ?? (b.cv ? (Number.parseFloat(b.spend || "0") || 0) / b.cv : 0)
+                : sortKey === "cpc"
+                  ? b.calc_cpc ?? (Number.parseFloat(b.cpc || "0") || 0)
+                  : Number.parseFloat(String(b[sortKey])) || 0;
+
+      if (typeof aVal === "string" || typeof bVal === "string") {
+        const compare = String(aVal).localeCompare(String(bVal), "ja");
+        return sortAsc ? compare : -compare;
+      }
+
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    });
+
+    return rows;
+  }, [campaigns, sortAsc, sortKey]);
+
+  const analysisComments = useMemo(() => {
+    if (!insights) return [];
+    return generateAccountAnalysis(insights, campaigns);
+  }, [insights, campaigns]);
+
+  const onSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortAsc((prev) => !prev);
+      return;
+    }
+    setSortKey(key);
+    setSortAsc(false);
+  };
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue border-t-transparent" />
+      <div className="flex h-[50vh] items-center justify-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#2C5282] border-t-transparent" />
       </div>
     );
   }
 
-  if (!data) {
-    return <p className="text-center text-gray-500">データの取得に失敗しました</p>;
-  }
-
-  const { kpi, clients, dailyTrend } = data;
-
-  const getSortValue = (client: ClientData, key: SortKey): string | number => {
-    switch (key) {
-      case "name":
-        return client.name;
-      case "budget":
-        return client.monthly_budget_google + client.monthly_budget_meta;
-      case "budget_pct": {
-        const totalBudget = client.monthly_budget_google + client.monthly_budget_meta;
-        return totalBudget > 0 ? (client.total_cost / totalBudget) * 100 : 0;
-      }
-      case "status":
-        return client.status;
-      default:
-        return client[key];
-    }
-  };
-
-  // KPI cards
-  const kpiCards = [
-    {
-      label: "総消化額",
-      value: formatCurrency(kpi.current.total_cost),
-      change: calcChange(kpi.current.total_cost, kpi.previous.total_cost),
-    },
-    {
-      label: "総CV数",
-      value: formatNumber(kpi.current.total_conversions),
-      change: calcChange(kpi.current.total_conversions, kpi.previous.total_conversions),
-    },
-    {
-      label: "平均CPA",
-      value: formatCurrency(kpi.current.avg_cpa),
-      change: calcChange(kpi.current.avg_cpa, kpi.previous.avg_cpa),
-      inverted: true,
-    },
-    {
-      label: "平均ROAS",
-      value: `${formatNumber(kpi.current.avg_roas, 2)}x`,
-      change: calcChange(kpi.current.avg_roas, kpi.previous.avg_roas),
-    },
-  ];
-
-  // Sort clients
-  const sortedClients = [...clients].sort((a, b) => {
-    const aVal = getSortValue(a, sortKey);
-    const bVal = getSortValue(b, sortKey);
-    if (typeof aVal === "string" || typeof bVal === "string") {
-      const result = String(aVal).localeCompare(String(bVal), "ja");
-      return sortAsc ? result : -result;
-    }
-    return sortAsc ? aVal - bVal : bVal - aVal;
-  });
-
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortAsc(!sortAsc);
-    } else {
-      setSortKey(key);
-      setSortAsc(false);
-    }
-  };
-
-  // Chart data
-  const chartDataKey =
-    chartMetric === "cost" ? "total_cost" : chartMetric === "cv" ? "total_conversions" : "avg_cpa";
-  const chartLabel =
-    chartMetric === "cost" ? "消化額" : chartMetric === "cv" ? "CV数" : "CPA";
-  const chartFormatter = (v: number) =>
-    chartMetric === "cv" ? formatNumber(v) : formatCurrency(v);
-
   return (
-    <div className="space-y-8">
-      {/* BIG 4 KPI Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {kpiCards.map((card) => (
-          <div
-            key={card.label}
-            className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
-          >
-            <p className="text-sm font-medium text-gray-500">{card.label}</p>
-            <p className="mt-2 text-2xl font-bold text-navy">{card.value}</p>
-            <div className="mt-1">
-              <ChangeIndicator value={card.change} inverted={card.inverted} />
-              <span className="ml-1 text-xs text-gray-400">前月比</span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Client Table */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-        <div className="border-b border-gray-200 px-6 py-4">
-          <h2 className="text-base font-semibold text-navy">クライアント一覧</h2>
+    <div className="space-y-6 bg-gray-50">
+      <div className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-[#1B2A4A]">Meta Ads ダッシュボード</h2>
+          <p className="mt-1 text-sm text-gray-500">{getPresetRangeLabel(insights, datePreset)}</p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                {[
-                  { key: "name", label: "クライアント" },
-                  { key: "budget", label: "予算" },
-                  { key: "total_cost", label: "消化額" },
-                  { key: "budget_pct", label: "消化率" },
-                  { key: "total_conversions", label: "CV" },
-                  { key: "avg_cpa", label: "CPA" },
-                  { key: "avg_roas", label: "ROAS" },
-                  { key: "avg_ctr", label: "CTR" },
-                  { key: "status", label: "ステータス" },
-                ].map((col) => (
-                  <th
-                    key={col.key}
-                    onClick={() => handleSort(col.key as SortKey)}
-                    className="cursor-pointer px-4 py-3 hover:text-navy"
-                  >
-                    {col.label}
-                    {sortKey === col.key && (sortAsc ? " ↑" : " ↓")}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {sortedClients.map((client) => {
-                const totalBudget = client.monthly_budget_google + client.monthly_budget_meta;
-                return (
-                  <tr key={client.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/dashboard/clients/${client.id}`}
-                        className="font-medium text-blue hover:underline"
-                      >
-                        {client.name}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {totalBudget > 0 ? formatCurrency(totalBudget) : "--"}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">
-                      {formatCurrency(client.total_cost)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <BudgetBar spent={client.total_cost} budget={totalBudget} />
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {formatNumber(client.total_conversions)}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {client.avg_cpa > 0 ? formatCurrency(client.avg_cpa) : "--"}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {client.avg_roas > 0 ? `${formatNumber(client.avg_roas, 2)}x` : "--"}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {client.avg_ctr > 0 ? `${formatNumber(client.avg_ctr, 2)}%` : "--"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={client.status} />
-                    </td>
-                  </tr>
-                );
-              })}
-              {sortedClients.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
-                    クライアントが登録されていません
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <label className="text-sm text-gray-700">
+            アカウント
+            <select
+              className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+              value={accountId}
+              onChange={(event) => setAccountId(event.target.value)}
+            >
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}（{account.account_id}）
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-gray-700">
+            期間
+            <select
+              className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+              value={datePreset}
+              onChange={(event) => setDatePreset(event.target.value)}
+            >
+              <option value="today">今日</option>
+              <option value="yesterday">昨日</option>
+              <option value="last_7d">過去7日</option>
+              <option value="last_30d">過去30日</option>
+              <option value="this_month">今月</option>
+            </select>
+          </label>
         </div>
       </div>
 
-      {/* Daily Trend Chart */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-navy">日別推移</h2>
-          <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
-            {(["cost", "cv", "cpa"] as ChartMetric[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setChartMetric(m)}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                  chartMetric === m
-                    ? "bg-white text-navy shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {m === "cost" ? "消化額" : m === "cv" ? "CV数" : "CPA"}
-              </button>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {detailsLoading ? (
+        <div className="flex h-64 items-center justify-center rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#2C5282] border-t-transparent" />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {kpis.map((kpi) => (
+              <div key={kpi.label} className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                <p className="text-sm text-gray-500">{kpi.label}</p>
+                <p className="mt-2 text-2xl font-bold text-[#1B2A4A] tabular-nums">{kpi.value}</p>
+              </div>
             ))}
           </div>
-        </div>
-        {dailyTrend.length > 0 ? (
-          <ResponsiveContainer width="100%" height={320}>
-            <LineChart data={dailyTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis
-                dataKey="date"
-                tickFormatter={(date: string | number | undefined) =>
-                  String(date ?? "").slice(5)
-                }
-                tick={{ fontSize: 12, fill: "#6B7280" }}
-              />
-              <YAxis
-                tickFormatter={(value: number | undefined) =>
-                  chartFormatter(value ?? 0)
-                }
-                tick={{ fontSize: 12, fill: "#6B7280" }}
-                width={80}
-              />
-              <Tooltip
-                formatter={(value: number | undefined) => [
-                  chartFormatter(value ?? 0),
-                  chartLabel,
-                ]}
-                labelFormatter={(label) => String(label ?? "")}
-              />
-              <Line
-                type="monotone"
-                dataKey={chartDataKey}
-                stroke="#2C5282"
-                strokeWidth={2}
-                dot={{ r: 3 }}
-                activeDot={{ r: 5 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex h-64 items-center justify-center text-gray-400">
-            データがありません
+
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead className="bg-gray-50 text-xs text-gray-500">
+                <tr>
+                  {[
+                    { key: "campaign_name", label: "キャンペーン名" },
+                    { key: "spend", label: "消化額" },
+                    { key: "impressions", label: "IMP" },
+                    { key: "clicks", label: "クリック" },
+                    { key: "ctr", label: "CTR" },
+                    { key: "cpc", label: "CPC" },
+                    { key: "lp_views", label: "LPV" },
+                    { key: "cv", label: "CV" },
+                    { key: "cpa", label: "CPA" },
+                  ].map((col) => (
+                    <th
+                      key={col.key}
+                      className="cursor-pointer px-4 py-3 text-left font-medium hover:text-[#1B2A4A]"
+                      onClick={() => onSort(col.key as SortKey)}
+                    >
+                      {col.label}
+                      {sortKey === col.key ? (sortAsc ? " ↑" : " ↓") : ""}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedCampaigns.map((campaign, index) => {
+                  const spend = Number.parseFloat(campaign.spend || "0") || 0;
+                  const impressions = Number.parseFloat(campaign.impressions || "0") || 0;
+                  const clicks = Number.parseFloat(campaign.clicks || "0") || 0;
+                  const ctr = Number.parseFloat(campaign.ctr || "0") || 0;
+                  const lpViews = campaign.lp_views ?? actionValue(campaign.actions, "landing_page_view");
+                  const cv = campaign.cv ?? actionValue(campaign.actions, "offsite_conversion.fb_pixel_custom");
+                  const cpc = campaign.calc_cpc ?? (clicks > 0 ? spend / clicks : 0);
+                  const cpa = campaign.cpa ?? (cv > 0 ? spend / cv : 0);
+
+                  return (
+                    <tr
+                      key={campaign.campaign_id}
+                      className={`cursor-pointer ${index % 2 === 0 ? "bg-white" : "bg-gray-50/60"} hover:bg-blue-50`}
+                      onClick={() =>
+                        router.push(
+                          `/dashboard/campaigns/${campaign.campaign_id}?accountId=${encodeURIComponent(accountId)}`,
+                        )
+                      }
+                    >
+                      <td className="px-4 py-3 font-medium text-[#1B2A4A]">{campaign.campaign_name}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatCurrency(spend)}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatNumber(Math.round(impressions))}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatNumber(Math.round(clicks))}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatPercent(ctr)}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatCurrency(cpc)}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatNumber(Math.round(lpViews))}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatNumber(Math.round(cv))}</td>
+                      <td className="px-4 py-3 tabular-nums">{cv > 0 ? formatCurrency(cpa) : "-"}</td>
+                    </tr>
+                  );
+                })}
+                {sortedCampaigns.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
+                      キャンペーンデータがありません
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+
+          <section className="rounded-xl border-l-4 border-[#2C5282] bg-blue-50 p-4">
+            <h3 className="text-base font-semibold text-[#1B2A4A]">分析コメント</h3>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-700">
+              {analysisComments.map((comment) => (
+                <li key={comment}>{comment}</li>
+              ))}
+            </ul>
+          </section>
+
+          {selectedAccount && (
+            <p className="text-xs text-gray-500">
+              通貨: {selectedAccount.currency} / タイムゾーン: {selectedAccount.timezone_name}
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

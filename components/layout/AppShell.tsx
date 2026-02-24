@@ -5,15 +5,9 @@ import { usePathname } from "next/navigation";
 import Sidebar from "@/components/layout/Sidebar";
 
 const titles: { prefix: string; title: string }[] = [
-  { prefix: "/dashboard/compare", title: "媒体比較" },
-  { prefix: "/dashboard/alerts", title: "アラート" },
-  { prefix: "/dashboard/reports", title: "レポート" },
-  { prefix: "/dashboard/clients/", title: "クライアント詳細" },
+  { prefix: "/dashboard/compare", title: "比較" },
+  { prefix: "/dashboard/campaigns/", title: "キャンペーン詳細" },
   { prefix: "/dashboard", title: "ダッシュボード" },
-  { prefix: "/settings/api-keys", title: "APIキー管理" },
-  { prefix: "/settings/clients", title: "クライアント管理" },
-  { prefix: "/settings/users", title: "ユーザー管理" },
-  { prefix: "/settings", title: "設定" },
 ];
 
 function getTitle(pathname: string): string {
@@ -27,7 +21,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Mobile overlay */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
@@ -35,7 +28,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         />
       )}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <main className="ml-0 md:ml-64 min-h-screen bg-gray-50">
+      <main className="ml-0 min-h-screen bg-gray-50 md:ml-64">
         <header className="sticky top-0 z-20 flex h-16 items-center border-b border-gray-200 bg-white px-4 md:px-8">
           <button
             type="button"

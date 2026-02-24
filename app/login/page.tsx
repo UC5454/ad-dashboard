@@ -1,35 +1,8 @@
 "use client";
 
 import { signIn } from "next-auth/react";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const router = useRouter();
-
-  const handleCredentialsLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
-
-    if (result?.error) {
-      setError("メールアドレスまたはパスワードが正しくありません");
-      setLoading(false);
-    } else {
-      router.push("/dashboard");
-    }
-  };
-
   const handleGoogleLogin = () => {
     signIn("google", { callbackUrl: "/dashboard" });
   };
@@ -37,7 +10,6 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#1B2A4A]">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl">
-        {/* Logo */}
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-[#1B2A4A]">
             広告ダッシュボード
@@ -47,7 +19,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Google OAuth */}
         <button
           onClick={handleGoogleLogin}
           className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
@@ -73,58 +44,9 @@ export default function LoginPage() {
           Googleアカウントでログイン
         </button>
 
-        <p className="my-2 text-center text-xs text-gray-400">
+        <p className="mt-3 text-center text-xs text-gray-400">
           @digital-gorilla.co.jp ドメインのみ
         </p>
-
-        {/* Divider */}
-        <div className="my-6 flex items-center">
-          <div className="flex-1 border-t border-gray-200" />
-          <span className="px-4 text-sm text-gray-400">または</span>
-          <div className="flex-1 border-t border-gray-200" />
-        </div>
-
-        {/* Credentials Login */}
-        <form onSubmit={handleCredentialsLogin} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              メールアドレス
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-[#2C5282] focus:outline-none focus:ring-1 focus:ring-[#2C5282]"
-              placeholder="you@digital-gorilla.co.jp"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              パスワード
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-[#2C5282] focus:outline-none focus:ring-1 focus:ring-[#2C5282]"
-              placeholder="パスワードを入力"
-              required
-            />
-          </div>
-
-          {error && (
-            <p className="text-sm text-red-600">{error}</p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-[#2C5282] px-4 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#1B2A4A] disabled:opacity-50"
-          >
-            {loading ? "ログイン中..." : "ログイン"}
-          </button>
-        </form>
       </div>
     </div>
   );

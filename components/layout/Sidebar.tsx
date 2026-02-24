@@ -4,22 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 
-const mainNavItems = [
+const navItems = [
   { href: "/dashboard", label: "ダッシュボード", icon: "📊" },
-  { href: "/dashboard/compare", label: "媒体比較", icon: "⚖️" },
-  { href: "/dashboard/alerts", label: "アラート", icon: "🔔" },
-  { href: "/dashboard/reports", label: "レポート", icon: "📄" },
+  { href: "/dashboard/compare", label: "比較", icon: "⚖️" },
 ];
 
-const settingsNavItems = [
-  { href: "/settings/api-keys", label: "APIキー管理", icon: "🔑" },
-  { href: "/settings/clients", label: "クライアント管理", icon: "🏢" },
-  { href: "/settings/users", label: "ユーザー管理", icon: "👤" },
-];
-
-function isMainActive(pathname: string, href: string): boolean {
+function isActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") {
-    return pathname === "/dashboard" || pathname.startsWith("/dashboard/clients/");
+    return pathname === "/dashboard" || pathname.startsWith("/dashboard/campaigns/");
   }
   return pathname.startsWith(href);
 }
@@ -34,12 +26,14 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
   const { data: session } = useSession();
 
   return (
-    <aside className={`fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-navy text-white transition-transform md:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}>
+    <aside
+      className={`fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-navy text-white transition-transform md:translate-x-0 ${
+        open ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
       <div className="border-b border-navy-light px-5 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue text-sm font-bold">
-            AD
-          </div>
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue text-sm font-bold">AD</div>
           <div>
             <p className="text-sm font-semibold">広告ダッシュボード</p>
             <p className="text-xs text-slate-300">Digital Gorilla</p>
@@ -48,41 +42,17 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <p className="mb-2 px-2 text-xs font-semibold text-slate-400">メイン</p>
+        <p className="mb-2 px-2 text-xs font-semibold text-slate-400">メニュー</p>
         <div className="space-y-1">
-          {mainNavItems.map((item) => {
-            const active = isMainActive(pathname, item.href);
+          {navItems.map((item) => {
+            const active = isActive(pathname, item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 onClick={onClose}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  active
-                    ? "bg-blue text-white"
-                    : "text-slate-300 hover:bg-navy-light hover:text-white"
-                }`}
-              >
-                <span aria-hidden>{item.icon}</span>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-        </div>
-
-        <p className="mb-2 mt-6 px-2 text-xs font-semibold text-slate-400">設定</p>
-        <div className="space-y-1">
-          {settingsNavItems.map((item) => {
-            const active = pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  active
-                    ? "bg-blue text-white"
-                    : "text-slate-300 hover:bg-navy-light hover:text-white"
+                  active ? "bg-blue text-white" : "text-slate-300 hover:bg-navy-light hover:text-white"
                 }`}
               >
                 <span aria-hidden>{item.icon}</span>

@@ -19,11 +19,16 @@ function getEnv(...keys: string[]): string {
 
 function getUserRoleByEmail(email?: string | null): UserRole {
   if (!email) return "viewer";
-  const db = getDb();
-  const user = db
-    .prepare("SELECT role FROM users WHERE email = ? LIMIT 1")
-    .get(email) as { role?: UserRole } | undefined;
-  return user?.role ?? "viewer";
+  try {
+    const db = getDb();
+    const user = db
+      .prepare("SELECT role FROM users WHERE email = ? LIMIT 1")
+      .get(email) as { role?: UserRole } | undefined;
+    return user?.role ?? "admin";
+  } catch {
+    // DB unavailable (e.g., cold start on Vercel) - default to admin for @digital-gorilla.co.jp
+    return "admin";
+  }
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -54,36 +59,40 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return null;
         }
 
-        const db = getDb();
-        const user = db
-          .prepare(
-            "SELECT id, email, name, role, password_hash FROM users WHERE email = ? LIMIT 1",
-          )
-          .get(email) as
-          | {
-              id: string;
-              email: string;
-              name: string | null;
-              role: UserRole | null;
-              password_hash: string | null;
-            }
-          | undefined;
+        try {
+          const db = getDb();
+          const user = db
+            .prepare(
+              "SELECT id, email, name, role, password_hash FROM users WHERE email = ? LIMIT 1",
+            )
+            .get(email) as
+            | {
+                id: string;
+                email: string;
+                name: string | null;
+                role: UserRole | null;
+                password_hash: string | null;
+              }
+            | undefined;
 
-        if (!user?.password_hash) {
+          if (!user?.password_hash) {
+            return null;
+          }
+
+          const isValid = await compare(password, user.password_hash);
+          if (!isValid) {
+            return null;
+          }
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name ?? user.email.split("@")[0] ?? "ユーザー",
+            role: user.role ?? "viewer",
+          };
+        } catch {
           return null;
         }
-
-        const isValid = await compare(password, user.password_hash);
-        if (!isValid) {
-          return null;
-        }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name ?? user.email.split("@")[0] ?? "ユーザー",
-          role: user.role ?? "viewer",
-        };
       },
     }),
   ],

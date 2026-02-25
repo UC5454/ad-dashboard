@@ -19,6 +19,7 @@ interface DailyInput {
   spend: number;
   cv: number;
   impressions?: number;
+  clicks?: number;
 }
 
 interface CreativeInput {
@@ -135,6 +136,67 @@ export function generateAlerts(
         category: "performance",
         title: "配信停滞",
         message: "直近日のIMPが前日比30%以下です。",
+      });
+    }
+  }
+
+  if (sortedDaily.length >= 4) {
+    const latest = sortedDaily[sortedDaily.length - 1];
+    const recent = sortedDaily.slice(-4, -1);
+
+    const latestClicks = latest.clicks ?? 0;
+    const latestImpressions = latest.impressions ?? 0;
+    const latestCpc = latestClicks > 0 ? latest.spend / latestClicks : 0;
+    const avgCpc =
+      recent.reduce((sum, row) => {
+        const clicks = row.clicks ?? 0;
+        return sum + (clicks > 0 ? row.spend / clicks : 0);
+      }, 0) / recent.length;
+
+    if (latestClicks > 0 && avgCpc > 0 && latestCpc >= avgCpc * 2) {
+      alerts.push({
+        type: "warning",
+        category: "performance",
+        title: "CPC急騰",
+        message: `直近日のCPCが¥${Math.round(latestCpc).toLocaleString("ja-JP")}で、3日平均¥${Math.round(avgCpc).toLocaleString("ja-JP")}の2倍以上です。入札・ターゲティングを確認してください。`,
+      });
+    }
+
+    if (latestClicks > 0 && avgCpc > 0 && latestCpc <= avgCpc * 0.5) {
+      alerts.push({
+        type: "info",
+        category: "performance",
+        title: "CPC急落",
+        message: `直近日のCPCが¥${Math.round(latestCpc).toLocaleString("ja-JP")}で、3日平均¥${Math.round(avgCpc).toLocaleString("ja-JP")}の50%以下です。品質向上の可能性があります。`,
+      });
+    }
+
+    const latestCpm = latestImpressions > 0 ? (latest.spend / latestImpressions) * 1000 : 0;
+    const avgCpm =
+      recent.reduce((sum, row) => {
+        const impressions = row.impressions ?? 0;
+        return sum + (impressions > 0 ? (row.spend / impressions) * 1000 : 0);
+      }, 0) / recent.length;
+
+    if (latestImpressions > 0 && avgCpm > 0 && latestCpm >= avgCpm * 2) {
+      alerts.push({
+        type: "warning",
+        category: "performance",
+        title: "CPM急騰",
+        message: `直近日のCPMが¥${Math.round(latestCpm).toLocaleString("ja-JP")}で、3日平均の2倍以上です。競合状況やオーディエンス設定を確認してください。`,
+      });
+    }
+  }
+
+  if (sortedDaily.length >= 2) {
+    const latest = sortedDaily[sortedDaily.length - 1];
+    const previous = sortedDaily[sortedDaily.length - 2];
+    if ((previous.impressions ?? 0) > 0 && (latest.impressions ?? 0) === 0) {
+      alerts.push({
+        type: "critical",
+        category: "performance",
+        title: "配信停止検知",
+        message: "直近日のインプレッションが0です。審査落ち・配信停止の可能性があります。管理画面を確認してください。",
       });
     }
   }

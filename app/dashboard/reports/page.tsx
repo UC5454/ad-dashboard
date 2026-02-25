@@ -31,6 +31,7 @@ interface CampaignRow {
   impressions: number;
   clicks: number;
   ctr: number;
+  cpc?: number;
   cv: number;
   cpa: number;
 }
@@ -44,6 +45,7 @@ interface CreativeRow {
   impressions: number;
   clicks: number;
   ctr: number;
+  cpc?: number;
   cv: number;
   cpa: number;
 }
@@ -54,6 +56,7 @@ interface DailyRow {
   impressions: number;
   clicks: number;
   ctr: number;
+  cpc?: number;
   cv: number;
   cpa: number;
 }
@@ -66,6 +69,7 @@ interface ProjectDetailResponse {
     impressions: number;
     clicks: number;
     ctr: number;
+    cpc?: number;
     cv: number;
     cpa: number;
   };
@@ -219,36 +223,41 @@ export default function ReportsPage() {
   const onDownloadCsv = () => {
     if (!detail) return;
 
-    const rows: string[][] = [["日付", "消化額", "IMP", "クリック", "CTR", "CV", "CPA"]];
+    const rows: string[][] = [["日付", "消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]];
     detail.daily.forEach((row) => {
+      const cpc = row.clicks > 0 ? row.spend / row.clicks : 0;
       rows.push([
         row.date_start,
         String(Math.round(row.spend)),
         String(Math.round(row.impressions)),
         String(Math.round(row.clicks)),
         row.ctr.toFixed(1),
+        String(Math.round(cpc)),
         String(Math.round(row.cv)),
         String(Math.round(row.cpa)),
       ]);
     });
 
     rows.push([]);
-    rows.push(["キャンペーン", "消化額", "IMP", "クリック", "CTR", "CV", "CPA"]);
+    rows.push(["キャンペーン", "消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]);
     detail.campaigns.forEach((row) => {
+      const cpc = row.clicks > 0 ? row.spend / row.clicks : 0;
       rows.push([
         row.campaign_name,
         String(Math.round(row.spend)),
         String(Math.round(row.impressions)),
         String(Math.round(row.clicks)),
         row.ctr.toFixed(1),
+        String(Math.round(cpc)),
         String(Math.round(row.cv)),
         String(Math.round(row.cpa)),
       ]);
     });
 
     rows.push([]);
-    rows.push(["クリエイティブ", "キャンペーン", "消化額", "IMP", "クリック", "CTR", "CV", "CPA"]);
+    rows.push(["クリエイティブ", "キャンペーン", "消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]);
     detail.creatives.forEach((row) => {
+      const cpc = row.clicks > 0 ? row.spend / row.clicks : 0;
       rows.push([
         row.creative_name,
         row.campaign_name,
@@ -256,6 +265,7 @@ export default function ReportsPage() {
         String(Math.round(row.impressions)),
         String(Math.round(row.clicks)),
         row.ctr.toFixed(1),
+        String(Math.round(cpc)),
         String(Math.round(row.cv)),
         String(Math.round(row.cpa)),
       ]);
@@ -332,10 +342,11 @@ export default function ReportsPage() {
 
         {detail ? (
           <>
-            <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <section className="grid grid-cols-1 gap-4 md:grid-cols-5">
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs text-gray-500">消化額</p>
                 <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
+                <p className="mt-1 text-xs text-gray-500">Fee込: {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs text-gray-500">CV</p>
@@ -350,6 +361,12 @@ export default function ReportsPage() {
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs text-gray-500">CTR</p>
                 <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatPercent(detail.project.ctr)}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 p-4">
+                <p className="text-xs text-gray-500">CPC</p>
+                <p className="mt-1 text-lg font-semibold text-navy tabular-nums">
+                  {detail.project.clicks > 0 ? formatCurrency(detail.project.spend / detail.project.clicks) : "-"}
+                </p>
               </div>
             </section>
 
@@ -379,12 +396,16 @@ export default function ReportsPage() {
                       />
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                      <span className="tabular-nums">Fee込: {formatCurrency(budgetProgress.spendWithFee)}</span>
                       <span className="tabular-nums">理想: {formatPercent(budgetProgress.idealRate)}</span>
                       <span className="tabular-nums">
                         実績: {formatPercent(budgetProgress.consumptionRate ?? 0)}
                       </span>
                       <span className="tabular-nums">
                         着地予想: {budgetProgress.projectedSpend ? formatCurrency(budgetProgress.projectedSpend) : "-"}
+                      </span>
+                      <span className="tabular-nums">
+                        Fee込着地: {budgetProgress.projectedSpendWithFee ? formatCurrency(budgetProgress.projectedSpendWithFee) : "-"}
                       </span>
                       <span className="tabular-nums">
                         残予算: {budgetProgress.remainingBudget !== null ? formatCurrency(budgetProgress.remainingBudget) : "-"}
@@ -479,6 +500,7 @@ export default function ReportsPage() {
                     <th className="px-3 py-2 text-left font-medium">IMP</th>
                     <th className="px-3 py-2 text-left font-medium">クリック</th>
                     <th className="px-3 py-2 text-left font-medium">CTR</th>
+                    <th className="px-3 py-2 text-left font-medium">CPC</th>
                     <th className="px-3 py-2 text-left font-medium">CV</th>
                     <th className="px-3 py-2 text-left font-medium">CPA</th>
                   </tr>
@@ -491,6 +513,7 @@ export default function ReportsPage() {
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                       <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
                     </tr>
@@ -508,6 +531,7 @@ export default function ReportsPage() {
                     <th className="px-3 py-2 text-left font-medium">IMP</th>
                     <th className="px-3 py-2 text-left font-medium">クリック</th>
                     <th className="px-3 py-2 text-left font-medium">CTR</th>
+                    <th className="px-3 py-2 text-left font-medium">CPC</th>
                     <th className="px-3 py-2 text-left font-medium">CV</th>
                     <th className="px-3 py-2 text-left font-medium">CPA</th>
                   </tr>
@@ -520,6 +544,7 @@ export default function ReportsPage() {
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                       <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
                     </tr>
@@ -538,6 +563,7 @@ export default function ReportsPage() {
                     <th className="px-3 py-2 text-left font-medium">IMP</th>
                     <th className="px-3 py-2 text-left font-medium">クリック</th>
                     <th className="px-3 py-2 text-left font-medium">CTR</th>
+                    <th className="px-3 py-2 text-left font-medium">CPC</th>
                     <th className="px-3 py-2 text-left font-medium">CV</th>
                     <th className="px-3 py-2 text-left font-medium">CPA</th>
                   </tr>
@@ -551,6 +577,7 @@ export default function ReportsPage() {
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                       <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
                     </tr>

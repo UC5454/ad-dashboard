@@ -116,6 +116,13 @@ export function generateOverallAnalysis(projects: OverallProjectInput[]): Analys
     const bEff = b.spend > 0 ? b.cv / b.spend : 0;
     return bEff - aEff;
   });
+  const byCpc = [...projects]
+    .filter((project) => project.clicks > 0)
+    .map((project) => ({
+      ...project,
+      cpc: project.spend / project.clicks,
+    }))
+    .sort((a, b) => a.cpc - b.cpc);
 
   const bestCpa = byCpa[0];
   const worstCpa = byCpa[byCpa.length - 1];
@@ -144,6 +151,13 @@ export function generateOverallAnalysis(projects: OverallProjectInput[]): Analys
     const efficiency = bestEfficiency.spend > 0 ? (bestEfficiency.cv / bestEfficiency.spend) * 10000 : 0;
     insights.push(`CV効率は${bestEfficiency.name}が最良で、1万円あたり${efficiency.toFixed(1)}件のCVです。`);
   }
+  if (byCpc.length > 0) {
+    const lowestCpc = byCpc[0];
+    const highestCpc = byCpc[byCpc.length - 1];
+    insights.push(
+      `CPC最良は${lowestCpc.name}（${formatCurrency(lowestCpc.cpc)}）、CPC最高は${highestCpc.name}（${formatCurrency(highestCpc.cpc)}）です。`,
+    );
+  }
 
   if (worstCpa && overallCpa > 0 && worstCpa.cpa > overallCpa * 1.2) {
     const diff = ((worstCpa.cpa - overallCpa) / overallCpa) * 100;
@@ -157,6 +171,16 @@ export function generateOverallAnalysis(projects: OverallProjectInput[]): Analys
     recommendations.push(
       `${bestCtr.name}の高CTR訴求を${bestEfficiency.name}に横展開し、クリック後CV率を高めるABテスト（LP見出し・ファーストビュー）を実施してください。`,
     );
+  }
+
+  if (byCpc.length > 1) {
+    const lowestCpc = byCpc[0];
+    const highestCpc = byCpc[byCpc.length - 1];
+    if (lowestCpc.cpc > 0 && highestCpc.cpc >= lowestCpc.cpc * 2) {
+      recommendations.push(
+        `${highestCpc.name}のCPCが${formatCurrency(highestCpc.cpc)}と高いため、CPCが高い案件の入札調整を検討してください。`,
+      );
+    }
   }
 
   if (recommendations.length === 0) {
@@ -189,6 +213,7 @@ export function generateDailyAnalysis(daily: DailyInput[]): AnalysisResult {
       clicks: n(row.clicks),
       ctr: n(row.ctr),
       cv: row.cv ?? 0,
+      cpc: n(row.clicks) > 0 ? n(row.spend) / n(row.clicks) : 0,
     }))
     .sort((a, b) => a.date_start.localeCompare(b.date_start));
 
@@ -210,6 +235,18 @@ export function generateDailyAnalysis(daily: DailyInput[]): AnalysisResult {
       const cvChange = ((current.cv - prev.cv) / prev.cv) * 100;
       if (Math.abs(cvChange) >= 20) {
         insights.push(`${current.date_start}のCVは前日比${cvChange >= 0 ? "+" : ""}${formatPercent(cvChange)}です。`);
+      }
+    }
+
+    if (prev.cpc > 0) {
+      if (current.cpc >= prev.cpc * 2) {
+        insights.push(
+          `${current.date_start}のCPCは前日比で急騰し、${formatCurrency(current.cpc)}（前日 ${formatCurrency(prev.cpc)}）です。`,
+        );
+      } else if (current.cpc <= prev.cpc * 0.5) {
+        insights.push(
+          `${current.date_start}のCPCは前日比で急落し、${formatCurrency(current.cpc)}（前日 ${formatCurrency(prev.cpc)}）です。`,
+        );
       }
     }
   }
@@ -245,9 +282,15 @@ export function generateDailyAnalysis(daily: DailyInput[]): AnalysisResult {
   const spendValues = rows.map((row) => row.spend);
   const avgSpend = avg(spendValues);
   const latestSpend = rows[rows.length - 1]?.spend || 0;
+  const avgCpc = avg(rows.filter((row) => row.cpc > 0).map((row) => row.cpc));
+  const latestCpc = rows[rows.length - 1]?.cpc || 0;
   if (avgSpend > 0) {
     const pace = (latestSpend / avgSpend) * 100;
     insights.push(`直近消化ペースは期間平均比${formatPercent(pace - 100)}です。`);
+  }
+  if (avgCpc > 0 && latestCpc > 0) {
+    const cpcChange = ((latestCpc - avgCpc) / avgCpc) * 100;
+    insights.push(`直近CPCは期間平均比${cpcChange >= 0 ? "+" : ""}${formatPercent(cpcChange)}です。`);
   }
 
   if (weekday.length > 0 && weekend.length > 0 && weekendCvRate < weekdayCvRate * 0.8) {
@@ -318,6 +361,20 @@ export function generateCreativeAnalysis(creatives: CreativeInput[]): AnalysisRe
   highCtrLowCv.forEach((creative) => {
     insights.push(`${creative.creative_name || creative.ad_name}は高CTR (${formatPercent(creative.ctr)}) ですがCVが伸びていません。`);
   });
+
+  const cpcRanked = [...creatives]
+    .filter((creative) => creative.clicks > 0)
+    .map((creative) => ({
+      ...creative,
+      cpc: creative.spend / creative.clicks,
+    }))
+    .sort((a, b) => a.cpc - b.cpc);
+  if (cpcRanked.length > 0) {
+    const bestCpcCreative = cpcRanked[0];
+    insights.push(
+      `${bestCpcCreative.creative_name || bestCpcCreative.ad_name}はクリック効率が最も高く、CPCは${formatCurrency(bestCpcCreative.cpc)}です。`,
+    );
+  }
 
   if (worst && worst !== best) {
     recommendations.push(

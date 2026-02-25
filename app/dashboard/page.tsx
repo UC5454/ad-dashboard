@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { MetaInsights, MetaCreativeSummary } from "@/types/meta";
 import { calculateBudgetProgress, DEFAULT_BUDGETS } from "@/lib/budget";
 import { generateAlerts } from "@/lib/alerts";
@@ -114,6 +114,7 @@ export default function DashboardPage() {
 
   const cpa = summary.cv > 0 ? summary.spend / summary.cv : 0;
   const ctr = summary.impressions > 0 ? (summary.clicks / summary.impressions) * 100 : 0;
+  const cpc = summary.clicks > 0 ? summary.spend / summary.clicks : 0;
   const averageCpa = cpa;
 
   const sortedProjects = useMemo(() => {
@@ -133,6 +134,7 @@ export default function DashboardPage() {
       spend: toNumber(row.spend),
       cv: row.cv ?? 0,
       impressions: toNumber(row.impressions),
+      clicks: toNumber(row.clicks),
     }));
 
     return generateAlerts(
@@ -169,6 +171,7 @@ export default function DashboardPage() {
           ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
           cv,
           cpa: cv > 0 ? spend / cv : 0,
+          cpc: clicks > 0 ? spend / clicks : 0,
         };
       })
       .sort((a, b) => a.date_start.localeCompare(b.date_start));
@@ -231,7 +234,7 @@ export default function DashboardPage() {
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      <section className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <section className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">総消化額</p>
           <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{formatCurrency(summary.spend)}</p>
@@ -247,6 +250,10 @@ export default function DashboardPage() {
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">CTR</p>
           <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{formatPercent(ctr)}</p>
+        </article>
+        <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-gray-500">平均CPC</p>
+          <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{summary.clicks > 0 ? formatCurrency(cpc) : "-"}</p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">総クリック数</p>
@@ -296,10 +303,14 @@ export default function DashboardPage() {
                       <div className={`h-full ${barColor}`} style={{ width: `${Math.min(rate, 130)}%` }} />
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                      <span className="tabular-nums">Fee込: {formatCurrency(progress.spendWithFee)}</span>
                       <span className="tabular-nums">理想: {formatPercent(progress.idealRate)}</span>
                       <span className="tabular-nums">実績: {formatPercent(rate)}</span>
                       <span className="tabular-nums">
                         着地予想: {progress.projectedSpend ? formatCurrency(progress.projectedSpend) : "-"}
+                      </span>
+                      <span className="tabular-nums">
+                        Fee込着地: {progress.projectedSpendWithFee ? formatCurrency(progress.projectedSpendWithFee) : "-"}
                       </span>
                       <span className="tabular-nums">
                         残予算: {progress.remainingBudget !== null ? formatCurrency(progress.remainingBudget) : "-"}
@@ -326,22 +337,39 @@ export default function DashboardPage() {
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-4 text-base font-semibold text-navy">日次推移（消化額）</h3>
+        <h3 className="mb-4 text-base font-semibold text-navy">日次推移（消化額 / CPC）</h3>
         <ResponsiveContainer width="100%" height={320}>
-          <AreaChart data={daily}>
+          <AreaChart data={dailyRows}>
             <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
             <XAxis dataKey="date_start" tick={{ fill: "#64748B", fontSize: 12 }} />
             <YAxis
+              yAxisId="left"
+              tick={{ fill: "#64748B", fontSize: 12 }}
+              tickFormatter={(value: number) => `¥${Math.round(value).toLocaleString("ja-JP")}`}
+            />
+            <YAxis
+              yAxisId="right"
+              orientation="right"
               tick={{ fill: "#64748B", fontSize: 12 }}
               tickFormatter={(value: number) => `¥${Math.round(value).toLocaleString("ja-JP")}`}
             />
             <Tooltip
-              formatter={(value: number | string | undefined) => {
+              formatter={(value: number | string | undefined, name?: string) => {
                 const num = Number.parseFloat(String(value ?? 0)) || 0;
+                if (name === "cpc") return [`¥${Math.round(num).toLocaleString("ja-JP")}`, "CPC"];
                 return [formatCurrency(num), "消化額"];
               }}
             />
-            <Area type="monotone" dataKey="spend" stroke="#2C5282" fill="#93C5FD" fillOpacity={0.35} />
+            <Area yAxisId="left" type="monotone" dataKey="spend" stroke="#2C5282" fill="#93C5FD" fillOpacity={0.35} />
+            <Line
+              yAxisId="right"
+              type="monotone"
+              dataKey="cpc"
+              stroke="#F59E0B"
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              dot={false}
+            />
           </AreaChart>
         </ResponsiveContainer>
       </section>
@@ -367,6 +395,7 @@ export default function DashboardPage() {
                   <th className="px-3 py-2 text-left font-medium">IMP</th>
                   <th className="px-3 py-2 text-left font-medium">クリック</th>
                   <th className="px-3 py-2 text-left font-medium">CTR</th>
+                  <th className="px-3 py-2 text-left font-medium">CPC</th>
                   <th className="px-3 py-2 text-left font-medium">CV</th>
                   <th className="px-3 py-2 text-left font-medium">CPA</th>
                 </tr>
@@ -379,13 +408,14 @@ export default function DashboardPage() {
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                     <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                    <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.cpc) : "-"}</td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                     <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
                   </tr>
                 ))}
                 {dailyRows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-3 py-8 text-center text-gray-500">
                       日次データがありません
                     </td>
                   </tr>
@@ -410,6 +440,7 @@ export default function DashboardPage() {
                 <th className="px-3 py-2 text-left font-medium">IMP</th>
                 <th className="px-3 py-2 text-left font-medium">クリック</th>
                 <th className="px-3 py-2 text-left font-medium">CTR</th>
+                <th className="px-3 py-2 text-left font-medium">CPC</th>
                 <th className="px-3 py-2 text-left font-medium">CV</th>
                 <th className="px-3 py-2 text-left font-medium">CPA</th>
                 <th className="px-3 py-2 text-left font-medium">ステータス</th>
@@ -426,10 +457,14 @@ export default function DashboardPage() {
                       {project.name}
                     </Link>
                   </td>
-                  <td className="px-3 py-2 tabular-nums">{formatCurrency(project.spend)}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    <p>{formatCurrency(project.spend)}</p>
+                    <p className="text-xs text-gray-500">Fee込: {formatCurrency(project.progress.spendWithFee)}</p>
+                  </td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(project.impressions)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(project.clicks)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatPercent(project.ctr)}</td>
+                  <td className="px-3 py-2 tabular-nums">{project.clicks > 0 ? formatCurrency(project.spend / project.clicks) : "-"}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(project.cv)}</td>
                   <td
                     className={`px-3 py-2 tabular-nums ${
@@ -459,7 +494,7 @@ export default function DashboardPage() {
               ))}
               {sortedProjects.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-3 py-8 text-center text-gray-500">
                     案件データがありません
                   </td>
                 </tr>

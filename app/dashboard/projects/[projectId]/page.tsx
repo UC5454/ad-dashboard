@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculateBudgetProgress } from "@/lib/budget";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
@@ -35,6 +35,7 @@ interface CampaignRow {
   impressions: number;
   clicks: number;
   ctr: number;
+  cpc?: number;
   cv: number;
   cpa: number;
 }
@@ -48,6 +49,7 @@ interface AdsetRow {
   impressions: number;
   clicks: number;
   ctr: number;
+  cpc?: number;
   cv: number;
   cpa: number;
 }
@@ -66,6 +68,7 @@ interface CreativeRow {
   impressions: number;
   clicks: number;
   ctr: number;
+  cpc?: number;
   cv: number;
   cpa: number;
 }
@@ -76,6 +79,7 @@ interface DailyRow {
   impressions: number;
   clicks: number;
   ctr: number;
+  cpc?: number;
   cv: number;
   cpa: number;
 }
@@ -174,6 +178,14 @@ export default function ProjectDetailPage() {
     if (!detail) return null;
     return calculateBudgetProgress(detail.project.name, detail.project.spend);
   }, [detail]);
+  const projectCpc = detail && detail.project.clicks > 0 ? detail.project.spend / detail.project.clicks : 0;
+  const dailyChartRows = useMemo(() => {
+    if (!detail) return [];
+    return detail.daily.map((row) => ({
+      ...row,
+      cpc: row.clicks > 0 ? row.spend / row.clicks : 0,
+    }));
+  }, [detail]);
 
   if (loading) {
     return (
@@ -214,10 +226,11 @@ export default function ProjectDetailPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+      <section className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-7">
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">消化額</p>
           <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
+          <p className="mt-1 text-xs text-gray-500">Fee込: {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}</p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">CV</p>
@@ -232,6 +245,10 @@ export default function ProjectDetailPage() {
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">CTR</p>
           <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatPercent(detail.project.ctr)}</p>
+        </article>
+        <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-gray-500">CPC</p>
+          <p className="mt-2 text-xl font-bold text-navy tabular-nums">{detail.project.clicks > 0 ? formatCurrency(projectCpc) : "-"}</p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">クリック数</p>
@@ -269,12 +286,16 @@ export default function ProjectDetailPage() {
                 />
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                <span className="tabular-nums">Fee込: {formatCurrency(budgetProgress.spendWithFee)}</span>
                 <span className="tabular-nums">理想: {formatPercent(budgetProgress.idealRate)}</span>
                 <span className="tabular-nums">
                   実績: {formatPercent(budgetProgress.consumptionRate ?? 0)}
                 </span>
                 <span className="tabular-nums">
                   着地予想: {budgetProgress.projectedSpend ? formatCurrency(budgetProgress.projectedSpend) : "-"}
+                </span>
+                <span className="tabular-nums">
+                  Fee込着地: {budgetProgress.projectedSpendWithFee ? formatCurrency(budgetProgress.projectedSpendWithFee) : "-"}
                 </span>
                 <span className="tabular-nums">
                   残予算: {budgetProgress.remainingBudget !== null ? formatCurrency(budgetProgress.remainingBudget) : "-"}
@@ -355,22 +376,29 @@ export default function ProjectDetailPage() {
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-4 text-base font-semibold text-navy">日次推移（消化額 / CV）</h3>
+        <h3 className="mb-4 text-base font-semibold text-navy">日次推移（消化額 / CV / CPC）</h3>
         <ResponsiveContainer width="100%" height={320}>
-          <AreaChart data={detail.daily}>
+          <AreaChart data={dailyChartRows}>
             <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
             <XAxis dataKey="date_start" tick={{ fill: "#64748B", fontSize: 12 }} />
-            <YAxis yAxisId="left" tick={{ fill: "#64748B", fontSize: 12 }} />
+            <YAxis
+              yAxisId="left"
+              tick={{ fill: "#64748B", fontSize: 12 }}
+              tickFormatter={(value: number) => `¥${Math.round(value).toLocaleString("ja-JP")}`}
+            />
             <YAxis yAxisId="right" orientation="right" tick={{ fill: "#64748B", fontSize: 12 }} />
+            <YAxis yAxisId="cpc" orientation="right" hide tickFormatter={(value: number) => `¥${Math.round(value).toLocaleString("ja-JP")}`} />
             <Tooltip
               formatter={(value: number | string | undefined, name?: string) => {
                 const num = Number.parseFloat(String(value ?? 0)) || 0;
                 if (name === "spend") return [formatCurrency(num), "消化額"];
+                if (name === "cpc") return [formatCurrency(num), "CPC"];
                 return [formatNumber(num), "CV"];
               }}
             />
             <Area yAxisId="left" type="monotone" dataKey="spend" stroke="#2C5282" fill="#93C5FD" fillOpacity={0.35} />
             <Area yAxisId="right" type="monotone" dataKey="cv" stroke="#059669" fill="#6EE7B7" fillOpacity={0.25} />
+            <Line yAxisId="cpc" type="monotone" dataKey="cpc" stroke="#F59E0B" strokeDasharray="5 5" strokeWidth={2} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </section>
@@ -386,6 +414,7 @@ export default function ProjectDetailPage() {
                 <th className="px-3 py-2 text-left font-medium">IMP</th>
                 <th className="px-3 py-2 text-left font-medium">クリック</th>
                 <th className="px-3 py-2 text-left font-medium">CTR</th>
+                <th className="px-3 py-2 text-left font-medium">CPC</th>
                 <th className="px-3 py-2 text-left font-medium">CV</th>
                 <th className="px-3 py-2 text-left font-medium">CPA</th>
               </tr>
@@ -398,13 +427,14 @@ export default function ProjectDetailPage() {
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                  <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                   <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
                 </tr>
               ))}
               {detail.campaigns.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-gray-500">
+                  <td colSpan={8} className="px-3 py-8 text-center text-gray-500">
                     キャンペーンデータがありません
                   </td>
                 </tr>
@@ -426,6 +456,7 @@ export default function ProjectDetailPage() {
                 <th className="px-3 py-2 text-left font-medium">IMP</th>
                 <th className="px-3 py-2 text-left font-medium">クリック</th>
                 <th className="px-3 py-2 text-left font-medium">CTR</th>
+                <th className="px-3 py-2 text-left font-medium">CPC</th>
                 <th className="px-3 py-2 text-left font-medium">CV</th>
                 <th className="px-3 py-2 text-left font-medium">CPA</th>
               </tr>
@@ -439,13 +470,14 @@ export default function ProjectDetailPage() {
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                  <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                   <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
                 </tr>
               ))}
               {detail.adsets.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-3 py-8 text-center text-gray-500">
                     広告セットデータがありません
                   </td>
                 </tr>
@@ -487,6 +519,7 @@ export default function ProjectDetailPage() {
                   <th className="px-3 py-2 text-left font-medium">IMP</th>
                   <th className="px-3 py-2 text-left font-medium">クリック</th>
                   <th className="px-3 py-2 text-left font-medium">CTR</th>
+                  <th className="px-3 py-2 text-left font-medium">CPC</th>
                   <th className="px-3 py-2 text-left font-medium">CV</th>
                   <th className="px-3 py-2 text-left font-medium">CPA</th>
                   <th className="px-3 py-2 text-left font-medium">評価</th>
@@ -501,6 +534,7 @@ export default function ProjectDetailPage() {
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                     <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                    <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}</td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                     <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
                     <td className="px-3 py-2">

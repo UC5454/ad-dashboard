@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { calculateBudgetProgress } from "@/lib/budget";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 
@@ -153,6 +154,11 @@ export default function ReportsPage() {
   const selectedProjectName = useMemo(() => {
     return projects.find((project) => project.id === selectedProjectId)?.name || "未選択";
   }, [projects, selectedProjectId]);
+
+  const budgetProgress = useMemo(() => {
+    if (!detail) return null;
+    return calculateBudgetProgress(detail.project.name, detail.project.spend);
+  }, [detail]);
 
   const onLoadReport = async () => {
     if (!selectedProjectId) {
@@ -347,6 +353,48 @@ export default function ReportsPage() {
               </div>
             </section>
 
+            {budgetProgress && (
+              <section className="rounded-lg border border-gray-200 p-4">
+                <h4 className="text-base font-semibold text-navy">予算進捗</h4>
+                {budgetProgress.monthlyBudget === null ? (
+                  <p className="mt-2 text-sm text-gray-500">予算未設定のため、進捗を算出できません。</p>
+                ) : (
+                  <>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="font-medium text-navy">{detail.project.name}</span>
+                      <span className="text-xs text-gray-500 tabular-nums">
+                        {formatCurrency(detail.project.spend)} / {formatCurrency(budgetProgress.monthlyBudget)}
+                      </span>
+                    </div>
+                    <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className={`h-full ${
+                          budgetProgress.paceStatus === "under"
+                            ? "bg-blue"
+                            : budgetProgress.paceStatus === "over"
+                              ? "bg-red-500"
+                              : "bg-emerald-500"
+                        }`}
+                        style={{ width: `${Math.min(budgetProgress.consumptionRate ?? 0, 130)}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                      <span className="tabular-nums">理想: {formatPercent(budgetProgress.idealRate)}</span>
+                      <span className="tabular-nums">
+                        実績: {formatPercent(budgetProgress.consumptionRate ?? 0)}
+                      </span>
+                      <span className="tabular-nums">
+                        着地予想: {budgetProgress.projectedSpend ? formatCurrency(budgetProgress.projectedSpend) : "-"}
+                      </span>
+                      <span className="tabular-nums">
+                        残予算: {budgetProgress.remainingBudget !== null ? formatCurrency(budgetProgress.remainingBudget) : "-"}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+
             <section className="space-y-3 rounded-lg border border-gray-200 p-4">
               <h4 className="text-base font-semibold text-navy">AI分析</h4>
               {[detail.analysis.overall, detail.analysis.daily, detail.analysis.creative].map((block, index) => (
@@ -378,16 +426,26 @@ export default function ReportsPage() {
                 <p className="text-xs font-semibold text-gray-600">次月に向けた改善施策</p>
                 <ul className="mt-1 space-y-1 text-sm text-gray-700">
                   {detail.analysis.clientReport.improvements.map((item, index) => (
-                    <li key={`improvement-${index}`}>・{item}</li>
+                    <li key={`improvement-${index}`} className="flex items-start gap-2">
+                      <span className="text-amber">→</span>
+                      <span>{item}</span>
+                    </li>
                   ))}
                 </ul>
               </div>
               <div>
                 <p className="text-xs font-semibold text-gray-600">今月の振り返り</p>
                 <ul className="mt-1 space-y-1 text-sm text-gray-700">
-                  {detail.analysis.clientReport.retrospective.map((item, index) => (
-                    <li key={`retro-${index}`}>・{item}</li>
-                  ))}
+                  {detail.analysis.clientReport.retrospective.map((item, index) => {
+                    const isPositive = item.includes("良かった点");
+                    const isIssue = item.includes("課題");
+                    const colorClass = isPositive ? "text-emerald-700" : isIssue ? "text-amber-700" : "text-gray-700";
+                    return (
+                      <li key={`retro-${index}`} className={colorClass}>
+                        ・{item}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             </section>

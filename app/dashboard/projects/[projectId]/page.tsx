@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { calculateBudgetProgress } from "@/lib/budget";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 type AiTab = "overall" | "daily" | "creative";
@@ -169,6 +170,10 @@ export default function ProjectDetailPage() {
 
   const bestCreativeId = rankedCreatives[0]?.ad_id;
   const worstCreativeId = rankedCreatives[rankedCreatives.length - 1]?.ad_id;
+  const budgetProgress = useMemo(() => {
+    if (!detail) return null;
+    return calculateBudgetProgress(detail.project.name, detail.project.spend);
+  }, [detail]);
 
   if (loading) {
     return (
@@ -209,7 +214,7 @@ export default function ProjectDetailPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">消化額</p>
           <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
@@ -228,7 +233,72 @@ export default function ProjectDetailPage() {
           <p className="text-sm text-gray-500">CTR</p>
           <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatPercent(detail.project.ctr)}</p>
         </article>
+        <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-gray-500">クリック数</p>
+          <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatNumber(detail.project.clicks)}</p>
+        </article>
+        <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-gray-500">IMP</p>
+          <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatNumber(detail.project.impressions)}</p>
+        </article>
       </section>
+
+      {budgetProgress && (
+        <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <h3 className="mb-3 text-base font-semibold text-navy">予算進捗</h3>
+          {budgetProgress.monthlyBudget === null ? (
+            <p className="text-sm text-gray-500">予算未設定のため、進捗を算出できません。</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="font-semibold text-navy">{detail.project.name}</span>
+                <span className="text-xs text-gray-500 tabular-nums">
+                  {formatCurrency(detail.project.spend)} / {formatCurrency(budgetProgress.monthlyBudget)}
+                </span>
+              </div>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className={`h-full ${
+                    budgetProgress.paceStatus === "under"
+                      ? "bg-blue"
+                      : budgetProgress.paceStatus === "over"
+                        ? "bg-red-500"
+                        : "bg-emerald-500"
+                  }`}
+                  style={{ width: `${Math.min(budgetProgress.consumptionRate ?? 0, 130)}%` }}
+                />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                <span className="tabular-nums">理想: {formatPercent(budgetProgress.idealRate)}</span>
+                <span className="tabular-nums">
+                  実績: {formatPercent(budgetProgress.consumptionRate ?? 0)}
+                </span>
+                <span className="tabular-nums">
+                  着地予想: {budgetProgress.projectedSpend ? formatCurrency(budgetProgress.projectedSpend) : "-"}
+                </span>
+                <span className="tabular-nums">
+                  残予算: {budgetProgress.remainingBudget !== null ? formatCurrency(budgetProgress.remainingBudget) : "-"}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] ${
+                    budgetProgress.paceStatus === "under"
+                      ? "bg-blue-50 text-blue-700"
+                      : budgetProgress.paceStatus === "over"
+                        ? "bg-red-50 text-red-700"
+                        : "bg-emerald-50 text-emerald-700"
+                  }`}
+                >
+                  {budgetProgress.paceStatus === "under"
+                    ? "ペース遅れ"
+                    : budgetProgress.paceStatus === "over"
+                      ? "超過ペース"
+                      : "順調"}
+                </span>
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap gap-2">

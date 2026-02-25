@@ -11,7 +11,7 @@ const navItems = [
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") {
-    return pathname === "/dashboard" || pathname.startsWith("/dashboard/campaigns/");
+    return pathname === "/dashboard" || pathname.startsWith("/dashboard/projects/");
   }
   return pathname.startsWith(href);
 }

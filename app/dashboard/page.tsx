@@ -3,14 +3,24 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { DG_ACCOUNT_ID } from "@/lib/constants";
 import { actionValue } from "@/lib/meta-utils";
-import type { MetaCampaignInsights, MetaInsights } from "@/types/meta";
+import type { MetaInsights } from "@/types/meta";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 
 interface DailyRow extends MetaInsights {
   cv?: number;
+}
+
+interface ProjectRow {
+  id: string;
+  name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
 }
 
 function formatCurrency(value: number): string {
@@ -35,7 +45,7 @@ function rowCv(row: { actions?: Array<{ action_type: string; value: string }>; c
 
 export default function DashboardPage() {
   const [datePreset, setDatePreset] = useState<DatePreset>("last_30d");
-  const [campaigns, setCampaigns] = useState<MetaCampaignInsights[]>([]);
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [daily, setDaily] = useState<DailyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -47,28 +57,28 @@ export default function DashboardPage() {
       setLoading(true);
       setError("");
       try {
-        const [campaignRes, dailyRes] = await Promise.all([
-          fetch(`/api/meta/campaigns?date_preset=${datePreset}`),
+        const [projectRes, dailyRes] = await Promise.all([
+          fetch(`/api/meta/projects?date_preset=${datePreset}`),
           fetch(`/api/meta/daily?date_preset=${datePreset}`),
         ]);
 
-        if (!campaignRes.ok || !dailyRes.ok) {
+        if (!projectRes.ok || !dailyRes.ok) {
           throw new Error("ダッシュボードデータの取得に失敗しました");
         }
 
-        const [campaignRows, dailyRows] = await Promise.all([
-          campaignRes.json() as Promise<MetaCampaignInsights[]>,
+        const [projectRows, dailyRows] = await Promise.all([
+          projectRes.json() as Promise<ProjectRow[]>,
           dailyRes.json() as Promise<DailyRow[]>,
         ]);
 
         if (!mounted) return;
 
-        setCampaigns(Array.isArray(campaignRows) ? campaignRows : []);
+        setProjects(Array.isArray(projectRows) ? projectRows : []);
         setDaily(Array.isArray(dailyRows) ? dailyRows : []);
       } catch (err) {
         if (!mounted) return;
         setError(err instanceof Error ? err.message : "データ取得エラー");
-        setCampaigns([]);
+        setProjects([]);
         setDaily([]);
       } finally {
         if (mounted) {
@@ -85,28 +95,24 @@ export default function DashboardPage() {
   }, [datePreset]);
 
   const summary = useMemo(() => {
-    return campaigns.reduce(
+    return projects.reduce(
       (acc, row) => {
-        const spend = toNumeric(row.spend);
-        const impressions = toNumeric(row.impressions);
-        const clicks = toNumeric(row.clicks);
-        const cv = rowCv(row);
-        acc.spend += spend;
-        acc.impressions += impressions;
-        acc.clicks += clicks;
-        acc.cv += cv;
+        acc.spend += row.spend;
+        acc.impressions += row.impressions;
+        acc.clicks += row.clicks;
+        acc.cv += row.cv;
         return acc;
       },
       { spend: 0, impressions: 0, clicks: 0, cv: 0 },
     );
-  }, [campaigns]);
+  }, [projects]);
 
   const cpa = summary.cv > 0 ? summary.spend / summary.cv : 0;
   const ctr = summary.impressions > 0 ? (summary.clicks / summary.impressions) * 100 : 0;
 
-  const sortedCampaigns = useMemo(() => {
-    return [...campaigns].sort((a, b) => toNumeric(b.spend) - toNumeric(a.spend));
-  }, [campaigns]);
+  const sortedProjects = useMemo(() => {
+    return [...projects].sort((a, b) => b.spend - a.spend);
+  }, [projects]);
 
   if (loading) {
     return (
@@ -122,7 +128,7 @@ export default function DashboardPage() {
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h2 className="text-2xl font-bold text-navy">デジタルゴリラ ダッシュボード</h2>
-            <p className="mt-1 text-sm text-gray-500">固定アカウント: {DG_ACCOUNT_ID}</p>
+            <p className="mt-1 text-sm text-gray-500">案件別パフォーマンスの集約ビュー</p>
           </div>
           <label className="text-sm text-gray-700">
             期間
@@ -185,14 +191,14 @@ export default function DashboardPage() {
 
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-navy">キャンペーン一覧（ドリルダウン）</h3>
-          <span className="text-xs text-gray-500">案件数: {formatNumber(sortedCampaigns.length)}</span>
+          <h3 className="text-base font-semibold text-navy">案件一覧</h3>
+          <span className="text-xs text-gray-500">案件数: {formatNumber(sortedProjects.length)}</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-sm">
             <thead className="bg-gray-50 text-xs text-gray-500">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">キャンペーン</th>
+                <th className="px-3 py-2 text-left font-medium">案件名</th>
                 <th className="px-3 py-2 text-left font-medium">消化額</th>
                 <th className="px-3 py-2 text-left font-medium">IMP</th>
                 <th className="px-3 py-2 text-left font-medium">クリック</th>
@@ -202,42 +208,58 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {sortedCampaigns.map((campaign, index) => {
-                const spend = toNumeric(campaign.spend);
-                const impressions = toNumeric(campaign.impressions);
-                const clicks = toNumeric(campaign.clicks);
-                const cv = rowCv(campaign);
-                const cpaValue = cv > 0 ? spend / cv : 0;
-
-                return (
-                  <tr key={campaign.campaign_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                    <td className="px-3 py-2 font-medium text-navy">
-                      <Link
-                        href={`/dashboard/campaigns/${campaign.campaign_id}`}
-                        className="text-blue hover:text-blue-light hover:underline"
-                      >
-                        {campaign.campaign_name}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2 tabular-nums">{formatCurrency(spend)}</td>
-                    <td className="px-3 py-2 tabular-nums">{formatNumber(impressions)}</td>
-                    <td className="px-3 py-2 tabular-nums">{formatNumber(clicks)}</td>
-                    <td className="px-3 py-2 tabular-nums">{formatPercent(toNumeric(campaign.ctr))}</td>
-                    <td className="px-3 py-2 tabular-nums">{formatNumber(cv)}</td>
-                    <td className="px-3 py-2 tabular-nums">{cv > 0 ? formatCurrency(cpaValue) : "-"}</td>
-                  </tr>
-                );
-              })}
-              {sortedCampaigns.length === 0 && (
+              {sortedProjects.map((project, index) => (
+                <tr key={project.id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                  <td className="px-3 py-2 font-medium text-navy">
+                    <Link
+                      href={`/dashboard/projects/${project.id}`}
+                      className="text-blue hover:text-blue-light hover:underline"
+                    >
+                      {project.name}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">{formatCurrency(project.spend)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatNumber(project.impressions)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatNumber(project.clicks)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatPercent(project.ctr)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatNumber(project.cv)}</td>
+                  <td className="px-3 py-2 tabular-nums">{project.cv > 0 ? formatCurrency(project.cpa) : "-"}</td>
+                </tr>
+              ))}
+              {sortedProjects.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-3 py-8 text-center text-gray-500">
-                    キャンペーンデータがありません
+                    案件データがありません
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-4 text-base font-semibold text-navy">日次推移（CV）</h3>
+        <ResponsiveContainer width="100%" height={280}>
+          <AreaChart
+            data={daily.map((row) => ({
+              ...row,
+              cv: rowCv(row),
+              spend: toNumeric(row.spend),
+            }))}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+            <XAxis dataKey="date_start" tick={{ fill: "#64748B", fontSize: 12 }} />
+            <YAxis tick={{ fill: "#64748B", fontSize: 12 }} />
+            <Tooltip
+              formatter={(value: number | string | undefined) => {
+                const num = Number.parseFloat(String(value ?? 0)) || 0;
+                return [formatNumber(num), "CV"];
+              }}
+            />
+            <Area type="monotone" dataKey="cv" stroke="#059669" fill="#6EE7B7" fillOpacity={0.25} />
+          </AreaChart>
+        </ResponsiveContainer>
       </section>
     </div>
   );

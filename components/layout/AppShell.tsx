@@ -6,7 +6,7 @@ import Sidebar from "@/components/layout/Sidebar";
 
 const titles: { prefix: string; title: string }[] = [
   { prefix: "/dashboard/reports", title: "レポート" },
-  { prefix: "/dashboard/campaigns/", title: "キャンペーン詳細" },
+  { prefix: "/dashboard/projects/", title: "案件詳細" },
   { prefix: "/dashboard", title: "ダッシュボード" },
 ];
 

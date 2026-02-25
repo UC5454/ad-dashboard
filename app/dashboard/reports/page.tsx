@@ -1,36 +1,74 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { actionValue } from "@/lib/meta-utils";
-import type { MetaCampaignInsights, MetaInsights } from "@/types/meta";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-interface DailyRow extends MetaInsights {
-  cv?: number;
+type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
+
+interface ProjectRow {
+  id: string;
+  name: string;
 }
 
-interface CampaignDetail {
+interface AnalysisResult {
+  summary: string;
+  insights: string[];
+  recommendations: string[];
+}
+
+interface CampaignRow {
   campaign_id: string;
   campaign_name: string;
-  impressions: string;
-  clicks: string;
-  spend: string;
-  ctr: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
   cv: number;
   cpa: number;
 }
 
-interface CampaignDetailResponse {
-  campaign: CampaignDetail;
+interface CreativeRow {
+  ad_id: string;
+  ad_name: string;
+  creative_name: string;
+  campaign_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
+}
+
+interface DailyRow {
+  date_start: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
+}
+
+interface ProjectDetailResponse {
+  project: {
+    id: string;
+    name: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    ctr: number;
+    cv: number;
+    cpa: number;
+  };
+  campaigns: CampaignRow[];
+  creatives: CreativeRow[];
   daily: DailyRow[];
+  analysis: {
+    overall: AnalysisResult;
+    daily: AnalysisResult;
+    creative: AnalysisResult;
+  };
 }
 
 function formatCurrency(value: number): string {
@@ -43,14 +81,6 @@ function formatNumber(value: number): string {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
-}
-
-function monthRange(value: string): { since: string; until: string } {
-  const [year, month] = value.split("-").map((v) => Number(v));
-  const since = new Date(year, month - 1, 1);
-  const until = new Date(year, month, 0);
-  const ymd = (d: Date) => d.toISOString().slice(0, 10);
-  return { since: ymd(since), until: ymd(until) };
 }
 
 function downloadCSV(filename: string, rows: string[][]) {
@@ -69,33 +99,33 @@ async function loadExternalModule(moduleName: string): Promise<unknown> {
   return importer(moduleName);
 }
 
-function campaignCv(row: MetaCampaignInsights): number {
-  return actionValue(row.actions, "offsite_conversion.fb_pixel_custom");
-}
-
 export default function ReportsPage() {
-  const now = new Date();
-  const initialMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-
-  const [period, setPeriod] = useState(initialMonth);
-  const [campaigns, setCampaigns] = useState<MetaCampaignInsights[]>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState("all");
-  const [reportCampaigns, setReportCampaigns] = useState<MetaCampaignInsights[]>([]);
-  const [daily, setDaily] = useState<DailyRow[]>([]);
+  const [datePreset, setDatePreset] = useState<DatePreset>("last_30d");
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [detail, setDetail] = useState<ProjectDetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [bootLoading, setBootLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let mounted = true;
-    const loadCampaigns = async () => {
+
+    const loadProjects = async () => {
       setBootLoading(true);
       try {
-        const res = await fetch("/api/meta/campaigns?date_preset=last_30d");
-        if (!res.ok) throw new Error("キャンペーン取得に失敗しました");
-        const data = (await res.json()) as MetaCampaignInsights[];
+        const res = await fetch("/api/meta/projects?date_preset=last_30d");
+        if (!res.ok) throw new Error("案件取得に失敗しました");
+
+        const rows = (await res.json()) as Array<{ id: string; name: string }>;
         if (!mounted) return;
-        setCampaigns(Array.isArray(data) ? data : []);
+
+        const mapped = Array.isArray(rows) ? rows.map((row) => ({ id: row.id, name: row.name })) : [];
+
+        setProjects(mapped);
+        if (mapped.length > 0) {
+          setSelectedProjectId(mapped[0].id);
+        }
       } catch (err) {
         if (mounted) {
           setError(err instanceof Error ? err.message : "データ取得エラー");
@@ -104,91 +134,41 @@ export default function ReportsPage() {
         if (mounted) setBootLoading(false);
       }
     };
-    void loadCampaigns();
+
+    void loadProjects();
+
     return () => {
       mounted = false;
     };
   }, []);
 
-  const summary = useMemo(() => {
-    return reportCampaigns.reduce(
-      (acc, row) => {
-        const spend = Number.parseFloat(row.spend || "0") || 0;
-        const impressions = Number.parseFloat(row.impressions || "0") || 0;
-        const clicks = Number.parseFloat(row.clicks || "0") || 0;
-        const cv = campaignCv(row);
-
-        acc.spend += spend;
-        acc.impressions += impressions;
-        acc.clicks += clicks;
-        acc.cv += cv;
-        return acc;
-      },
-      { spend: 0, impressions: 0, clicks: 0, cv: 0 },
-    );
-  }, [reportCampaigns]);
-
-  const ctr = summary.impressions > 0 ? (summary.clicks / summary.impressions) * 100 : 0;
-  const cpa = summary.cv > 0 ? summary.spend / summary.cv : 0;
-
-  const selectedCampaignName = useMemo(() => {
-    if (selectedCampaignId === "all") return "全キャンペーン";
-    return campaigns.find((campaign) => campaign.campaign_id === selectedCampaignId)?.campaign_name || "未選択";
-  }, [campaigns, selectedCampaignId]);
+  const selectedProjectName = useMemo(() => {
+    return projects.find((project) => project.id === selectedProjectId)?.name || "未選択";
+  }, [projects, selectedProjectId]);
 
   const onLoadReport = async () => {
-    const range = monthRange(period);
+    if (!selectedProjectId) {
+      setError("案件を選択してください");
+      return;
+    }
+
     setLoading(true);
     setError("");
+
     try {
-      if (selectedCampaignId === "all") {
-        const [campaignsRes, dailyRes] = await Promise.all([
-          fetch("/api/meta/campaigns?date_preset=last_30d"),
-          fetch(`/api/meta/daily?since=${range.since}&until=${range.until}`),
-        ]);
+      const res = await fetch(
+        `/api/meta/project-detail?project_id=${encodeURIComponent(selectedProjectId)}&date_preset=${encodeURIComponent(datePreset)}`,
+      );
 
-        if (!campaignsRes.ok || !dailyRes.ok) {
-          throw new Error("レポートデータの取得に失敗しました");
-        }
-
-        const [campaignRows, dailyRows] = await Promise.all([
-          campaignsRes.json() as Promise<MetaCampaignInsights[]>,
-          dailyRes.json() as Promise<DailyRow[]>,
-        ]);
-
-        setReportCampaigns(Array.isArray(campaignRows) ? campaignRows : []);
-        setDaily(Array.isArray(dailyRows) ? dailyRows : []);
-      } else {
-        const detailRes = await fetch(
-          `/api/meta/campaign-detail?campaign_id=${encodeURIComponent(selectedCampaignId)}&date_preset=last_30d&since=${range.since}&until=${range.until}`,
-        );
-        if (!detailRes.ok) {
-          throw new Error("キャンペーンレポートの取得に失敗しました");
-        }
-
-        const detail = (await detailRes.json()) as CampaignDetailResponse;
-        const campaign = detail.campaign;
-
-        setReportCampaigns([
-          {
-            ...campaign,
-            impressions: campaign.impressions,
-            clicks: campaign.clicks,
-            spend: campaign.spend,
-            ctr: campaign.ctr,
-            cpc: campaign.cv > 0 ? String(campaign.cpa) : "0",
-            date_start: "",
-            date_stop: "",
-            actions: [{ action_type: "offsite_conversion.fb_pixel_custom", value: String(campaign.cv) }],
-          },
-        ] as MetaCampaignInsights[]);
-
-        setDaily(Array.isArray(detail.daily) ? detail.daily : []);
+      if (!res.ok) {
+        throw new Error("レポートデータの取得に失敗しました");
       }
+
+      const data = (await res.json()) as ProjectDetailResponse;
+      setDetail(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "レポート取得エラー");
-      setReportCampaigns([]);
-      setDaily([]);
+      setDetail(null);
     } finally {
       setLoading(false);
     }
@@ -196,7 +176,7 @@ export default function ReportsPage() {
 
   const onDownloadPdf = async () => {
     const preview = document.getElementById("report-preview");
-    if (!preview) return;
+    if (!preview || !detail) return;
 
     let jsPDFCtor: any;
     let html2canvasFn: any;
@@ -219,80 +199,101 @@ export default function ReportsPage() {
     const height = (canvas.height * width) / canvas.width;
 
     pdf.addImage(imageData, "PNG", 0, 0, width, height);
-    pdf.save(`meta_report_${period}_${selectedCampaignId}.pdf`);
+    pdf.save(`project_report_${datePreset}_${selectedProjectId}.pdf`);
   };
 
   const onDownloadCsv = () => {
-    const rows: string[][] = [["日付", "消化額", "IMP", "クリック", "CTR", "CV"]];
-    daily.forEach((row) => {
-      const spend = Number.parseFloat(row.spend || "0") || 0;
-      const impressions = Number.parseFloat(row.impressions || "0") || 0;
-      const clicks = Number.parseFloat(row.clicks || "0") || 0;
-      const rowCtr = Number.parseFloat(row.ctr || "0") || 0;
-      const cv = row.cv ?? actionValue(row.actions, "offsite_conversion.fb_pixel_custom");
+    if (!detail) return;
+
+    const rows: string[][] = [["日付", "消化額", "IMP", "クリック", "CTR", "CV", "CPA"]];
+    detail.daily.forEach((row) => {
       rows.push([
         row.date_start,
-        String(Math.round(spend)),
-        String(Math.round(impressions)),
-        String(Math.round(clicks)),
-        rowCtr.toFixed(1),
-        String(Math.round(cv)),
+        String(Math.round(row.spend)),
+        String(Math.round(row.impressions)),
+        String(Math.round(row.clicks)),
+        row.ctr.toFixed(1),
+        String(Math.round(row.cv)),
+        String(Math.round(row.cpa)),
       ]);
     });
 
     rows.push([]);
-    rows.push(["キャンペーン", "消化額", "IMP", "クリック", "CTR", "CV"]);
-    reportCampaigns.forEach((row) => {
+    rows.push(["キャンペーン", "消化額", "IMP", "クリック", "CTR", "CV", "CPA"]);
+    detail.campaigns.forEach((row) => {
       rows.push([
         row.campaign_name,
-        row.spend,
-        row.impressions,
-        row.clicks,
-        row.ctr,
-        String(campaignCv(row)),
+        String(Math.round(row.spend)),
+        String(Math.round(row.impressions)),
+        String(Math.round(row.clicks)),
+        row.ctr.toFixed(1),
+        String(Math.round(row.cv)),
+        String(Math.round(row.cpa)),
       ]);
     });
 
-    downloadCSV(`meta_report_${period}_${selectedCampaignId}.csv`, rows);
+    rows.push([]);
+    rows.push(["クリエイティブ", "キャンペーン", "消化額", "IMP", "クリック", "CTR", "CV", "CPA"]);
+    detail.creatives.forEach((row) => {
+      rows.push([
+        row.creative_name,
+        row.campaign_name,
+        String(Math.round(row.spend)),
+        String(Math.round(row.impressions)),
+        String(Math.round(row.clicks)),
+        row.ctr.toFixed(1),
+        String(Math.round(row.cv)),
+        String(Math.round(row.cpa)),
+      ]);
+    });
+
+    downloadCSV(`project_report_${datePreset}_${selectedProjectId}.csv`, rows);
   };
 
   return (
     <div className="space-y-6">
       <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <h2 className="text-2xl font-bold text-navy">レポート生成</h2>
-        <p className="mt-1 text-sm text-gray-500">デジタルゴリラ固定アカウントの月次レポートを出力します</p>
+        <p className="mt-1 text-sm text-gray-500">案件単位のレポートを生成します</p>
+
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="text-sm text-gray-700">
-            対象キャンペーン
+            対象案件
             <select
-              value={selectedCampaignId}
-              onChange={(event) => setSelectedCampaignId(event.target.value)}
+              value={selectedProjectId}
+              onChange={(event) => setSelectedProjectId(event.target.value)}
               className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
             >
-              <option value="all">全キャンペーン</option>
-              {campaigns.map((campaign) => (
-                <option key={campaign.campaign_id} value={campaign.campaign_id}>
-                  {campaign.campaign_name}
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
                 </option>
               ))}
             </select>
           </label>
+
           <label className="text-sm text-gray-700">
-            対象月
-            <input
-              type="month"
-              value={period}
-              onChange={(event) => setPeriod(event.target.value)}
+            期間
+            <select
+              value={datePreset}
+              onChange={(event) => setDatePreset(event.target.value as DatePreset)}
               className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
-            />
+            >
+              <option value="today">今日</option>
+              <option value="yesterday">昨日</option>
+              <option value="last_7d">過去7日</option>
+              <option value="last_30d">過去30日</option>
+              <option value="this_month">今月</option>
+            </select>
           </label>
+
           <div className="flex items-end">
             <button
               type="button"
               onClick={onLoadReport}
               className="w-full rounded-lg bg-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-light"
             >
-              レポートデータ読込
+              レポート生成
             </button>
           </div>
         </div>
@@ -309,94 +310,168 @@ export default function ReportsPage() {
 
       <section id="report-preview" className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <header>
-          <h3 className="text-xl font-bold text-navy">Meta Ads 月次レポート</h3>
+          <h3 className="text-xl font-bold text-navy">案件レポート</h3>
           <p className="mt-1 text-sm text-gray-500">
-            {selectedCampaignName} / {period}
+            {selectedProjectName} / {datePreset}
           </p>
         </header>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div className="rounded-lg bg-gray-50 p-4">
-            <p className="text-xs text-gray-500">消化額</p>
-            <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatCurrency(summary.spend)}</p>
-          </div>
-          <div className="rounded-lg bg-gray-50 p-4">
-            <p className="text-xs text-gray-500">IMP</p>
-            <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatNumber(summary.impressions)}</p>
-          </div>
-          <div className="rounded-lg bg-gray-50 p-4">
-            <p className="text-xs text-gray-500">CV</p>
-            <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatNumber(summary.cv)}</p>
-          </div>
-          <div className="rounded-lg bg-gray-50 p-4">
-            <p className="text-xs text-gray-500">CPA</p>
-            <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{summary.cv > 0 ? formatCurrency(cpa) : "-"}</p>
-          </div>
-        </div>
+        {detail ? (
+          <>
+            <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+              <div className="rounded-lg bg-gray-50 p-4">
+                <p className="text-xs text-gray-500">消化額</p>
+                <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 p-4">
+                <p className="text-xs text-gray-500">CV</p>
+                <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatNumber(detail.project.cv)}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 p-4">
+                <p className="text-xs text-gray-500">CPA</p>
+                <p className="mt-1 text-lg font-semibold text-navy tabular-nums">
+                  {detail.project.cv > 0 ? formatCurrency(detail.project.cpa) : "-"}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-50 p-4">
+                <p className="text-xs text-gray-500">CTR</p>
+                <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatPercent(detail.project.ctr)}</p>
+              </div>
+            </section>
 
-        <div className="h-72 rounded-lg border border-gray-200 p-3">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={daily.map((row) => ({
-                ...row,
-                spend: Number.parseFloat(row.spend || "0") || 0,
-                cv: row.cv ?? actionValue(row.actions, "offsite_conversion.fb_pixel_custom"),
-              }))}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-              <XAxis dataKey="date_start" tick={{ fill: "#64748B", fontSize: 12 }} />
-              <YAxis
-                yAxisId="left"
-                tick={{ fill: "#64748B", fontSize: 12 }}
-                tickFormatter={(v: number) => `¥${Math.round(v).toLocaleString("ja-JP")}`}
-              />
-              <YAxis
-                yAxisId="right"
-                orientation="right"
-                tick={{ fill: "#64748B", fontSize: 12 }}
-                tickFormatter={(v: number) => Math.round(v).toLocaleString("ja-JP")}
-              />
-              <Tooltip
-                formatter={(value: number | string | undefined, name?: string) => {
-                  const num = Number.parseFloat(String(value ?? 0)) || 0;
-                  if (name === "spend") return [formatCurrency(num), "消化額"];
-                  return [formatNumber(num), "CV"];
-                }}
-              />
-              <Line yAxisId="left" dataKey="spend" stroke="#2C5282" strokeWidth={2} dot={false} />
-              <Line yAxisId="right" dataKey="cv" stroke="#059669" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="bg-gray-50 text-xs text-gray-500">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">キャンペーン</th>
-                <th className="px-3 py-2 text-left font-medium">消化額</th>
-                <th className="px-3 py-2 text-left font-medium">IMP</th>
-                <th className="px-3 py-2 text-left font-medium">クリック</th>
-                <th className="px-3 py-2 text-left font-medium">CTR</th>
-                <th className="px-3 py-2 text-left font-medium">CV</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reportCampaigns.map((campaign, index) => (
-                <tr key={campaign.campaign_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                  <td className="px-3 py-2 font-medium text-navy">{campaign.campaign_name}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatCurrency(Number.parseFloat(campaign.spend || "0") || 0)}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatNumber(Number.parseFloat(campaign.impressions || "0") || 0)}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatNumber(Number.parseFloat(campaign.clicks || "0") || 0)}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatPercent(Number.parseFloat(campaign.ctr || "0") || 0)}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatNumber(campaignCv(campaign))}</td>
-                </tr>
+            <section className="space-y-3 rounded-lg border border-gray-200 p-4">
+              <h4 className="text-base font-semibold text-navy">AI分析</h4>
+              {[detail.analysis.overall, detail.analysis.daily, detail.analysis.creative].map((block, index) => (
+                <div key={`analysis-${index}`} className="rounded-lg bg-gray-50 p-3">
+                  <p className="text-sm font-medium text-navy">{block.summary}</p>
+                  <p className="mt-2 text-xs font-semibold text-gray-600">示唆</p>
+                  <ul className="mt-1 space-y-1 text-sm text-gray-700">
+                    {block.insights.map((item, itemIndex) => (
+                      <li key={`${item}-${itemIndex}`}>・{item}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs font-semibold text-gray-600">改善提案</p>
+                  <ul className="mt-1 space-y-1 text-sm text-gray-700">
+                    {block.recommendations.map((item, itemIndex) => (
+                      <li key={`${item}-${itemIndex}`}>・{item}</li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </section>
 
-        <p className="text-xs text-gray-500">全体CTR: {formatPercent(ctr)}</p>
+            <div className="h-72 rounded-lg border border-gray-200 p-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={detail.daily}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="date_start" tick={{ fill: "#64748B", fontSize: 12 }} />
+                  <YAxis yAxisId="left" tick={{ fill: "#64748B", fontSize: 12 }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: "#64748B", fontSize: 12 }} />
+                  <Tooltip
+                    formatter={(value: number | string | undefined, name?: string) => {
+                      const num = Number.parseFloat(String(value ?? 0)) || 0;
+                      if (name === "spend") return [formatCurrency(num), "消化額"];
+                      return [formatNumber(num), "CV"];
+                    }}
+                  />
+                  <Line yAxisId="left" dataKey="spend" stroke="#2C5282" strokeWidth={2} dot={false} />
+                  <Line yAxisId="right" dataKey="cv" stroke="#059669" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">日付</th>
+                    <th className="px-3 py-2 text-left font-medium">消化額</th>
+                    <th className="px-3 py-2 text-left font-medium">IMP</th>
+                    <th className="px-3 py-2 text-left font-medium">クリック</th>
+                    <th className="px-3 py-2 text-left font-medium">CTR</th>
+                    <th className="px-3 py-2 text-left font-medium">CV</th>
+                    <th className="px-3 py-2 text-left font-medium">CPA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.daily.map((row, index) => (
+                    <tr key={`${row.date_start}-${index}`} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                      <td className="px-3 py-2">{row.date_start}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">キャンペーン</th>
+                    <th className="px-3 py-2 text-left font-medium">消化額</th>
+                    <th className="px-3 py-2 text-left font-medium">IMP</th>
+                    <th className="px-3 py-2 text-left font-medium">クリック</th>
+                    <th className="px-3 py-2 text-left font-medium">CTR</th>
+                    <th className="px-3 py-2 text-left font-medium">CV</th>
+                    <th className="px-3 py-2 text-left font-medium">CPA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.campaigns.map((row, index) => (
+                    <tr key={row.campaign_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                      <td className="px-3 py-2 font-medium text-navy">{row.campaign_name}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">クリエイティブ</th>
+                    <th className="px-3 py-2 text-left font-medium">キャンペーン</th>
+                    <th className="px-3 py-2 text-left font-medium">消化額</th>
+                    <th className="px-3 py-2 text-left font-medium">IMP</th>
+                    <th className="px-3 py-2 text-left font-medium">クリック</th>
+                    <th className="px-3 py-2 text-left font-medium">CTR</th>
+                    <th className="px-3 py-2 text-left font-medium">CV</th>
+                    <th className="px-3 py-2 text-left font-medium">CPA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.creatives.map((row, index) => (
+                    <tr key={row.ad_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                      <td className="px-3 py-2 font-medium text-navy">{row.creative_name}</td>
+                      <td className="px-3 py-2">{row.campaign_name}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-gray-500">対象条件を選択してレポートを生成してください。</p>
+        )}
       </section>
 
       <section className="flex flex-wrap gap-3">

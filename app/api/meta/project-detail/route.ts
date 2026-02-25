@@ -3,8 +3,13 @@ import { auth } from "@/lib/auth";
 import { DG_ACCOUNT_ID } from "@/lib/constants";
 import { metaGet } from "@/lib/meta-api";
 import { actionValue, numeric } from "@/lib/meta-utils";
-import { PROJECTS, groupCampaignsToProjects } from "@/lib/projects";
-import { generateCreativeAnalysis, generateDailyAnalysis, generateOverallAnalysis } from "@/lib/ai-analysis";
+import { extractProjectName, groupCampaignsToProjects } from "@/lib/projects";
+import {
+  generateClientReport,
+  generateCreativeAnalysis,
+  generateDailyAnalysis,
+  generateOverallAnalysis,
+} from "@/lib/ai-analysis";
 import type { MetaAdInsights, MetaAdsetInsights, MetaCampaignInsights } from "@/types/meta";
 
 interface MetaListResponse<T> {
@@ -87,8 +92,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "project_id is required" }, { status: 400 });
   }
 
-  const projectDefinition = PROJECTS.find((project) => project.id === projectId);
-  if (!projectDefinition) {
+  const projectName = decodeURIComponent(projectId).trim();
+  if (!projectName) {
     return NextResponse.json({ error: "project not found" }, { status: 404 });
   }
 
@@ -101,8 +106,8 @@ export async function GET(request: NextRequest) {
     })) as MetaListResponse<MetaCampaignInsights>;
 
     const allCampaigns = campaignRes.data || [];
-    const matchedCampaigns = allCampaigns.filter((campaign) =>
-      projectDefinition.campaignPatterns.some((pattern) => (campaign.campaign_name || "").includes(pattern)),
+    const matchedCampaigns = allCampaigns.filter(
+      (campaign) => extractProjectName(campaign.campaign_name || "") === projectName,
     );
 
     const matchedCampaignIds = Array.from(new Set(matchedCampaigns.map((campaign) => campaign.campaign_id)));
@@ -110,8 +115,8 @@ export async function GET(request: NextRequest) {
     if (matchedCampaignIds.length === 0) {
       return NextResponse.json({
         project: {
-          id: projectDefinition.id,
-          name: projectDefinition.name,
+          id: projectId,
+          name: projectName,
           spend: 0,
           cv: 0,
           cpa: 0,
@@ -127,6 +132,20 @@ export async function GET(request: NextRequest) {
           overall: generateOverallAnalysis([]),
           daily: generateDailyAnalysis([]),
           creative: generateCreativeAnalysis([]),
+          clientReport: generateClientReport(
+            {
+              id: projectId,
+              name: projectName,
+              spend: 0,
+              cv: 0,
+              cpa: 0,
+              ctr: 0,
+              impressions: 0,
+              clicks: 0,
+            },
+            [],
+            [],
+          ),
         },
       });
     }
@@ -297,8 +316,8 @@ export async function GET(request: NextRequest) {
         return acc;
       },
       {
-        id: projectDefinition.id,
-        name: projectDefinition.name,
+        id: projectId,
+        name: projectName,
         spend: 0,
         cv: 0,
         cpa: 0,
@@ -351,6 +370,7 @@ export async function GET(request: NextRequest) {
             cpa: row.cpa,
           })),
         ),
+        clientReport: generateClientReport(project, daily, creatives),
       },
     });
   } catch (error) {

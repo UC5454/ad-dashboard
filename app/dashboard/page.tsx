@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { actionValue } from "@/lib/meta-utils";
 import type { MetaInsights } from "@/types/meta";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
@@ -33,14 +32,6 @@ function formatNumber(value: number): string {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
-}
-
-function toNumeric(value: string | undefined): number {
-  return Number.parseFloat(value || "0") || 0;
-}
-
-function rowCv(row: { actions?: Array<{ action_type: string; value: string }>; cv?: number }): number {
-  return row.cv ?? actionValue(row.actions, "offsite_conversion.fb_pixel_custom");
 }
 
 export default function DashboardPage() {
@@ -238,29 +229,6 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-4 text-base font-semibold text-navy">日次推移（CV）</h3>
-        <ResponsiveContainer width="100%" height={280}>
-          <AreaChart
-            data={daily.map((row) => ({
-              ...row,
-              cv: rowCv(row),
-              spend: toNumeric(row.spend),
-            }))}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-            <XAxis dataKey="date_start" tick={{ fill: "#64748B", fontSize: 12 }} />
-            <YAxis tick={{ fill: "#64748B", fontSize: 12 }} />
-            <Tooltip
-              formatter={(value: number | string | undefined) => {
-                const num = Number.parseFloat(String(value ?? 0)) || 0;
-                return [formatNumber(num), "CV"];
-              }}
-            />
-            <Area type="monotone" dataKey="cv" stroke="#059669" fill="#6EE7B7" fillOpacity={0.25} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </section>
     </div>
   );
 }

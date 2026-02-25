@@ -4,6 +4,13 @@ export interface AnalysisResult {
   recommendations: string[];
 }
 
+export interface ClientReportResult {
+  summary: string;
+  performance: string;
+  improvements: string[];
+  retrospective: string[];
+}
+
 interface OverallProjectInput {
   name: string;
   spend: number;
@@ -24,6 +31,39 @@ interface DailyInput {
 }
 
 interface CreativeInput {
+  ad_name: string;
+  creative_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
+}
+
+interface ClientProjectInput {
+  id?: string;
+  name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
+}
+
+interface ClientDailyInput {
+  date_start: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
+}
+
+interface ClientCreativeInput {
+  ad_id?: string;
   ad_name: string;
   creative_name: string;
   spend: number;
@@ -106,17 +146,23 @@ export function generateOverallAnalysis(projects: OverallProjectInput[]): Analys
   }
 
   if (worstCpa && overallCpa > 0 && worstCpa.cpa > overallCpa * 1.2) {
-    recommendations.push(`${worstCpa.name}はCPAが全体平均より高いため、予算配分と訴求の見直しを優先してください。`);
+    const diff = ((worstCpa.cpa - overallCpa) / overallCpa) * 100;
+    recommendations.push(
+      `${worstCpa.name}はCPA ${formatCurrency(worstCpa.cpa)}で全体平均${formatCurrency(overallCpa)}比+${formatPercent(diff)}です。` +
+        " 1) 低CTRクリエイティブを停止 2) 反応が良い広告セットのオーディエンスを拡張 3) 類似オーディエンスの追加テストを実施してください。",
+    );
   }
 
   if (bestCtr && bestEfficiency && bestCtr.name !== bestEfficiency.name) {
     recommendations.push(
-      `${bestCtr.name}の高CTR訴求を${bestEfficiency.name}のCV導線に寄せて、クリック後のCV率改善を検証してください。`,
+      `${bestCtr.name}の高CTR訴求を${bestEfficiency.name}に横展開し、クリック後CV率を高めるABテスト（LP見出し・ファーストビュー）を実施してください。`,
     );
   }
 
   if (recommendations.length === 0) {
-    recommendations.push("全体効率は安定しています。高効率案件への段階的な予算増額を検討してください。");
+    recommendations.push(
+      "全体効率は安定しています。CV効率上位案件に対し、日予算を10〜20%増額しつつCPA悪化がないかを日次で確認してください。",
+    );
   }
 
   return {
@@ -205,15 +251,22 @@ export function generateDailyAnalysis(daily: DailyInput[]): AnalysisResult {
   }
 
   if (weekday.length > 0 && weekend.length > 0 && weekendCvRate < weekdayCvRate * 0.8) {
-    recommendations.push("週末の入札戦略と配信面を見直し、低効率時間帯の配信抑制を検討してください。");
+    const drop = ((weekdayCvRate - weekendCvRate) / weekdayCvRate) * 100;
+    recommendations.push(
+      `週末CV平均が平日比-${formatPercent(drop)}のため、週末入札を-15%に設定し、平日へ配信を寄せる配分テストを行ってください。`,
+    );
   }
 
   if (insights.some((line) => line.includes("前日比"))) {
-    recommendations.push("前日比20%以上の変動日は、予算変更・入札学習・クリエイティブ更新の影響を確認してください。");
+    recommendations.push(
+      "前日比20%以上の変動日は、該当日の入札変更ログとクリエイティブ更新履歴を確認し、影響が大きい場合は翌日まで日予算を±10%で調整してください。",
+    );
   }
 
   if (recommendations.length === 0) {
-    recommendations.push("日次推移は安定しています。現行設定で配信を継続しつつ週次で再評価してください。");
+    recommendations.push(
+      "日次推移は安定しています。直近3日平均の消化額が期間平均比+15%を超えた場合は日予算を10%引き上げ、逆に-15%を下回る場合は入札単価を5%引き上げて検証してください。",
+    );
   }
 
   const totalSpend = rows.reduce((sum, row) => sum + row.spend, 0);
@@ -267,20 +320,101 @@ export function generateCreativeAnalysis(creatives: CreativeInput[]): AnalysisRe
   });
 
   if (worst && worst !== best) {
-    recommendations.push(`${worst.creative_name || worst.ad_name}は訴求文とファーストビューを差し替え、再テストしてください。`);
+    recommendations.push(
+      `${worst.creative_name || worst.ad_name}はCPA ${formatCurrency(worst.cpa)}で成果が低いため、` +
+        `クリエイティブ差し替えと同時に配信量を-30%に抑え、7日間の改善検証を実施してください。`,
+    );
   }
 
   if (highCtrLowCv.length > 0) {
-    recommendations.push("遷移先LPのファーストビューとフォーム導線を見直し、クリック後離脱の改善を進めてください。");
+    recommendations.push(
+      "高CTR低CVの広告は、LPのファーストビュー・フォーム項目数の短縮を優先してABテストを行い、クリック後CV率の改善を測定してください。",
+    );
   }
 
   if (best) {
-    recommendations.push(`${best.creative_name || best.ad_name}の構図・訴求軸を横展開し、派生クリエイティブを追加してください。`);
+    recommendations.push(
+      `${best.creative_name || best.ad_name}の構図・訴求軸を横展開し、派生クリエイティブを3本追加して配信比率を段階的に引き上げてください。`,
+    );
   }
 
   return {
     summary: `対象${creatives.length}本のクリエイティブを評価し、成果差分と改善優先度を抽出しました。`,
     insights,
     recommendations,
+  };
+}
+
+export function generateClientReport(
+  project: ClientProjectInput,
+  daily: ClientDailyInput[],
+  creatives: ClientCreativeInput[],
+): ClientReportResult {
+  const totalSpend = project.spend || daily.reduce((sum, row) => sum + row.spend, 0);
+  const totalCv = project.cv || daily.reduce((sum, row) => sum + row.cv, 0);
+  const cpa = totalCv > 0 ? totalSpend / totalCv : project.cpa;
+
+  const rankedCreatives = [...creatives].sort((a, b) => {
+    if (b.cv !== a.cv) return b.cv - a.cv;
+    return a.cpa - b.cpa;
+  });
+
+  const bestCreative = rankedCreatives[0];
+  const worstCreative = rankedCreatives[rankedCreatives.length - 1];
+
+  const summary =
+    totalSpend > 0 || totalCv > 0
+      ? `今月の広告配信の結果をご報告いたします。総消化額は${formatCurrency(totalSpend)}、CV数は${Math.round(
+          totalCv,
+        ).toLocaleString("ja-JP")}件でした。`
+      : "今月の広告配信の結果をご報告いたします。対象期間内に配信実績が少ないため、詳細は次回集計でご報告いたします。";
+
+  const performanceParts: string[] = [];
+  if (totalCv > 0) {
+    performanceParts.push(`CPAは${formatCurrency(cpa)}で推移しています。`);
+  } else {
+    performanceParts.push("CV獲得が少ないため、次月に向けて改善余地が大きい状況です。");
+  }
+
+  if (bestCreative) {
+    performanceParts.push(
+      `成果が良いクリエイティブは「${bestCreative.creative_name || bestCreative.ad_name}」で、` +
+        `CPA ${bestCreative.cv > 0 ? formatCurrency(bestCreative.cpa) : "-"}でした。`,
+    );
+  }
+
+  if (worstCreative && worstCreative !== bestCreative) {
+    performanceParts.push(
+      `一方で「${worstCreative.creative_name || worstCreative.ad_name}」はCVが伸びず、` +
+        `改善優先度が高い結果です。`,
+    );
+  }
+
+  const improvements: string[] = [];
+  if (worstCreative && worstCreative.cv === 0 && worstCreative.spend >= 3000) {
+    improvements.push(
+      `CV0で消化額${formatCurrency(worstCreative.spend)}の広告は停止し、成果の良い広告へ予算を再配分いたします。`,
+    );
+  }
+  if (bestCreative) {
+    improvements.push(
+      `成果の良い訴求軸を横展開し、派生クリエイティブを追加して配信比率を段階的に引き上げます。`,
+    );
+  }
+  improvements.push("ターゲティングの配分を見直し、反応の良いオーディエンスへの配信割合を高めます。");
+
+  const retrospective: string[] = [];
+  if (totalCv > 0) {
+    retrospective.push("良かった点: 成果の出る訴求軸が明確になり、CV獲得の土台が整いました。");
+  } else {
+    retrospective.push("良かった点: 配信データの蓄積が進み、次回の改善判断材料が揃いました。");
+  }
+  retrospective.push("課題: 低効率クリエイティブの整理と、LP導線の改善余地が残っています。");
+
+  return {
+    summary,
+    performance: performanceParts.join(" "),
+    improvements,
+    retrospective,
   };
 }

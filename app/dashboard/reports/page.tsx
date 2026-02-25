@@ -16,6 +16,13 @@ interface AnalysisResult {
   recommendations: string[];
 }
 
+interface ClientReportResult {
+  summary: string;
+  performance: string;
+  improvements: string[];
+  retrospective: string[];
+}
+
 interface CampaignRow {
   campaign_id: string;
   campaign_name: string;
@@ -68,6 +75,7 @@ interface ProjectDetailResponse {
     overall: AnalysisResult;
     daily: AnalysisResult;
     creative: AnalysisResult;
+    clientReport: ClientReportResult;
   };
 }
 
@@ -358,6 +366,30 @@ export default function ReportsPage() {
                   </ul>
                 </div>
               ))}
+            </section>
+
+            <section className="space-y-3 rounded-lg border border-gray-200 p-4">
+              <h4 className="text-base font-semibold text-navy">クライアント向けコメント</h4>
+              <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
+                <p className="font-medium text-navy">{detail.analysis.clientReport.summary}</p>
+                <p className="mt-2">{detail.analysis.clientReport.performance}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-600">次月に向けた改善施策</p>
+                <ul className="mt-1 space-y-1 text-sm text-gray-700">
+                  {detail.analysis.clientReport.improvements.map((item, index) => (
+                    <li key={`improvement-${index}`}>・{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-600">今月の振り返り</p>
+                <ul className="mt-1 space-y-1 text-sm text-gray-700">
+                  {detail.analysis.clientReport.retrospective.map((item, index) => (
+                    <li key={`retro-${index}`}>・{item}</li>
+                  ))}
+                </ul>
+              </div>
             </section>
 
             <div className="h-72 rounded-lg border border-gray-200 p-3">

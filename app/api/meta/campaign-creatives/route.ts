@@ -22,28 +22,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const datePreset = request.nextUrl.searchParams.get("date_preset") || "last_30d";
   const campaignId = request.nextUrl.searchParams.get("campaign_id");
+  const datePreset = request.nextUrl.searchParams.get("date_preset") || "last_30d";
+
+  if (!campaignId) {
+    return NextResponse.json({ error: "campaign_id is required" }, { status: 400 });
+  }
 
   try {
-    const query: Record<string, string> = {
-      fields: "ad_id,ad_name,impressions,clicks,spend,ctr,actions,campaign_id,campaign_name,adset_id,adset_name",
+    const insights = (await metaGet(`${DG_ACCOUNT_ID}/insights`, {
+      fields: "ad_id,ad_name,impressions,clicks,spend,ctr,actions",
       level: "ad",
       date_preset: datePreset,
-      limit: "100",
-    };
-
-    if (campaignId) {
-      query.filtering = JSON.stringify([
+      filtering: JSON.stringify([
         {
           field: "campaign.id",
           operator: "EQUAL",
           value: campaignId,
         },
-      ]);
-    }
-
-    const insights = (await metaGet(`${DG_ACCOUNT_ID}/insights`, query)) as { data?: MetaAdInsights[] };
+      ]),
+      limit: "100",
+    })) as { data?: MetaAdInsights[] };
 
     const ads = insights.data || [];
 
@@ -62,19 +61,18 @@ export async function GET(request: NextRequest) {
 
     const creativeMap = new Map(creativeDetails.map((item) => [item.adId, item.data]));
 
-    const normalized: MetaCreativeSummary[] = ads.map((ad) => {
+    const creatives: MetaCreativeSummary[] = ads.map((ad) => {
       const spend = numeric(ad.spend);
       const impressions = numeric(ad.impressions);
       const clicks = numeric(ad.clicks);
       const cv = actionValue(ad.actions, "offsite_conversion.fb_pixel_custom");
       const creativeInfo = creativeMap.get(ad.ad_id);
-      const creativeName =
-        creativeInfo?.creative?.name || creativeInfo?.creative?.title || creativeInfo?.name || ad.ad_name;
 
       return {
         ad_id: ad.ad_id,
         ad_name: ad.ad_name,
-        creative_name: creativeName,
+        creative_name:
+          creativeInfo?.creative?.name || creativeInfo?.creative?.title || creativeInfo?.name || ad.ad_name,
         thumbnail_url: creativeInfo?.creative?.thumbnail_url || creativeInfo?.creative?.image_url || null,
         spend,
         impressions,
@@ -85,9 +83,9 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    normalized.sort((a, b) => b.spend - a.spend);
+    creatives.sort((a, b) => b.cv - a.cv);
 
-    return NextResponse.json(normalized);
+    return NextResponse.json(creatives);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Meta API request failed" },

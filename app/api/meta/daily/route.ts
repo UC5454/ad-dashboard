@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { DG_ACCOUNT_ID } from "@/lib/constants";
 import { metaGet } from "@/lib/meta-api";
-import { actionValue, normalizeAccountId } from "@/lib/meta-utils";
+import { actionValue } from "@/lib/meta-utils";
 import type { MetaInsights } from "@/types/meta";
 
 export async function GET(request: NextRequest) {
@@ -10,14 +11,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const accountId = request.nextUrl.searchParams.get("account_id");
   const datePreset = request.nextUrl.searchParams.get("date_preset") || "last_30d";
   const since = request.nextUrl.searchParams.get("since");
   const until = request.nextUrl.searchParams.get("until");
-
-  if (!accountId) {
-    return NextResponse.json({ error: "account_id is required" }, { status: 400 });
-  }
 
   try {
     const query: Record<string, string> = {
@@ -32,7 +28,7 @@ export async function GET(request: NextRequest) {
       query.date_preset = datePreset;
     }
 
-    const response = (await metaGet(`${normalizeAccountId(accountId)}/insights`, query)) as {
+    const response = (await metaGet(`${DG_ACCOUNT_ID}/insights`, query)) as {
       data?: MetaInsights[];
     };
 

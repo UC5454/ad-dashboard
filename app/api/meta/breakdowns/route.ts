@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { DG_ACCOUNT_ID } from "@/lib/constants";
 import { metaGet } from "@/lib/meta-api";
-import { actionValue, normalizeAccountId, numeric } from "@/lib/meta-utils";
+import { actionValue, numeric } from "@/lib/meta-utils";
 import type { MetaBreakdownInsights } from "@/types/meta";
 
 const ALLOWED_BREAKDOWNS = new Set([
@@ -19,14 +20,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const accountId = request.nextUrl.searchParams.get("account_id");
   const datePreset = request.nextUrl.searchParams.get("date_preset") || "last_30d";
   const dimension = request.nextUrl.searchParams.get("dimension") || "age";
   const campaignId = request.nextUrl.searchParams.get("campaign_id");
-
-  if (!accountId) {
-    return NextResponse.json({ error: "account_id is required" }, { status: 400 });
-  }
 
   if (!ALLOWED_BREAKDOWNS.has(dimension)) {
     return NextResponse.json({ error: "invalid dimension" }, { status: 400 });
@@ -51,7 +47,7 @@ export async function GET(request: NextRequest) {
       ]);
     }
 
-    const response = (await metaGet(`${normalizeAccountId(accountId)}/insights`, query)) as {
+    const response = (await metaGet(`${DG_ACCOUNT_ID}/insights`, query)) as {
       data?: MetaBreakdownInsights[];
     };
 

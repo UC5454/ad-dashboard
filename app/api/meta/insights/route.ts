@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { DG_ACCOUNT_ID } from "@/lib/constants";
 import { metaGet } from "@/lib/meta-api";
-import type { MetaAction, MetaInsights } from "@/types/meta";
-
-function normalizeAccountId(accountId: string): string {
-  return accountId.startsWith("act_") ? accountId : `act_${accountId}`;
-}
-
-function actionValue(actions: MetaAction[] | undefined, actionType: string): number {
-  const target = actions?.find((action) => action.action_type === actionType);
-  return target ? Number.parseFloat(target.value || "0") || 0 : 0;
-}
+import { actionValue } from "@/lib/meta-utils";
+import type { MetaInsights } from "@/types/meta";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -18,16 +11,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const accountId = request.nextUrl.searchParams.get("account_id");
   const datePreset = request.nextUrl.searchParams.get("date_preset") || "last_30d";
 
-  if (!accountId) {
-    return NextResponse.json({ error: "account_id is required" }, { status: 400 });
-  }
-
   try {
-    const endpoint = `${normalizeAccountId(accountId)}/insights`;
-    const response = (await metaGet(endpoint, {
+    const response = (await metaGet(`${DG_ACCOUNT_ID}/insights`, {
       fields:
         "impressions,clicks,spend,ctr,cpc,cpp,reach,frequency,actions,cost_per_action_type,date_start,date_stop",
       date_preset: datePreset,

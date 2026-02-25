@@ -6,8 +6,6 @@ import Sidebar from "@/components/layout/Sidebar";
 
 const titles: { prefix: string; title: string }[] = [
   { prefix: "/dashboard/reports", title: "レポート" },
-  { prefix: "/dashboard/alerts", title: "アラート" },
-  { prefix: "/dashboard/compare", title: "比較" },
   { prefix: "/dashboard/campaigns/", title: "キャンペーン詳細" },
   { prefix: "/dashboard", title: "ダッシュボード" },
 ];
@@ -24,10 +22,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-gray-50">
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <main className="ml-0 min-h-screen bg-gray-50 md:ml-64">

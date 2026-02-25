@@ -10,10 +10,27 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { MetaAccount, MetaCampaignInsights, MetaInsights } from "@/types/meta";
+import { actionValue } from "@/lib/meta-utils";
+import type { MetaCampaignInsights, MetaInsights } from "@/types/meta";
 
 interface DailyRow extends MetaInsights {
   cv?: number;
+}
+
+interface CampaignDetail {
+  campaign_id: string;
+  campaign_name: string;
+  impressions: string;
+  clicks: string;
+  spend: string;
+  ctr: string;
+  cv: number;
+  cpa: number;
+}
+
+interface CampaignDetailResponse {
+  campaign: CampaignDetail;
+  daily: DailyRow[];
 }
 
 function formatCurrency(value: number): string {
@@ -52,35 +69,33 @@ async function loadExternalModule(moduleName: string): Promise<unknown> {
   return importer(moduleName);
 }
 
+function campaignCv(row: MetaCampaignInsights): number {
+  return actionValue(row.actions, "offsite_conversion.fb_pixel_custom");
+}
+
 export default function ReportsPage() {
   const now = new Date();
   const initialMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  const [accounts, setAccounts] = useState<MetaAccount[]>([]);
-  const [accountId, setAccountId] = useState("");
   const [period, setPeriod] = useState(initialMonth);
   const [campaigns, setCampaigns] = useState<MetaCampaignInsights[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState("all");
+  const [reportCampaigns, setReportCampaigns] = useState<MetaCampaignInsights[]>([]);
   const [daily, setDaily] = useState<DailyRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [bootLoading, setBootLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const selectedAccount = useMemo(
-    () => accounts.find((account) => account.id === accountId) || null,
-    [accounts, accountId],
-  );
-
   useEffect(() => {
     let mounted = true;
-    const loadAccounts = async () => {
+    const loadCampaigns = async () => {
       setBootLoading(true);
       try {
-        const res = await fetch("/api/meta/accounts");
-        if (!res.ok) throw new Error("アカウント取得に失敗しました");
-        const data = (await res.json()) as MetaAccount[];
+        const res = await fetch("/api/meta/campaigns?date_preset=last_30d");
+        if (!res.ok) throw new Error("キャンペーン取得に失敗しました");
+        const data = (await res.json()) as MetaCampaignInsights[];
         if (!mounted) return;
-        setAccounts(data);
-        if (data.length > 0) setAccountId(data[0].id);
+        setCampaigns(Array.isArray(data) ? data : []);
       } catch (err) {
         if (mounted) {
           setError(err instanceof Error ? err.message : "データ取得エラー");
@@ -89,59 +104,90 @@ export default function ReportsPage() {
         if (mounted) setBootLoading(false);
       }
     };
-    void loadAccounts();
+    void loadCampaigns();
     return () => {
       mounted = false;
     };
   }, []);
 
   const summary = useMemo(() => {
-    return campaigns.reduce(
+    return reportCampaigns.reduce(
       (acc, row) => {
         const spend = Number.parseFloat(row.spend || "0") || 0;
         const impressions = Number.parseFloat(row.impressions || "0") || 0;
         const clicks = Number.parseFloat(row.clicks || "0") || 0;
-        const cv = row.actions?.find((a) => a.action_type === "offsite_conversion.fb_pixel_custom")?.value || "0";
+        const cv = campaignCv(row);
 
         acc.spend += spend;
         acc.impressions += impressions;
         acc.clicks += clicks;
-        acc.cv += Number.parseFloat(cv) || 0;
+        acc.cv += cv;
         return acc;
       },
       { spend: 0, impressions: 0, clicks: 0, cv: 0 },
     );
-  }, [campaigns]);
+  }, [reportCampaigns]);
 
   const ctr = summary.impressions > 0 ? (summary.clicks / summary.impressions) * 100 : 0;
   const cpa = summary.cv > 0 ? summary.spend / summary.cv : 0;
 
-  const onLoadReport = async () => {
-    if (!accountId) return;
+  const selectedCampaignName = useMemo(() => {
+    if (selectedCampaignId === "all") return "全キャンペーン";
+    return campaigns.find((campaign) => campaign.campaign_id === selectedCampaignId)?.campaign_name || "未選択";
+  }, [campaigns, selectedCampaignId]);
 
+  const onLoadReport = async () => {
     const range = monthRange(period);
     setLoading(true);
     setError("");
     try {
-      const [campaignsRes, dailyRes] = await Promise.all([
-        fetch(`/api/meta/campaigns?account_id=${encodeURIComponent(accountId)}&date_preset=last_30d`),
-        fetch(`/api/meta/daily?account_id=${encodeURIComponent(accountId)}&since=${range.since}&until=${range.until}`),
-      ]);
+      if (selectedCampaignId === "all") {
+        const [campaignsRes, dailyRes] = await Promise.all([
+          fetch("/api/meta/campaigns?date_preset=last_30d"),
+          fetch(`/api/meta/daily?since=${range.since}&until=${range.until}`),
+        ]);
 
-      if (!campaignsRes.ok || !dailyRes.ok) {
-        throw new Error("レポートデータの取得に失敗しました");
+        if (!campaignsRes.ok || !dailyRes.ok) {
+          throw new Error("レポートデータの取得に失敗しました");
+        }
+
+        const [campaignRows, dailyRows] = await Promise.all([
+          campaignsRes.json() as Promise<MetaCampaignInsights[]>,
+          dailyRes.json() as Promise<DailyRow[]>,
+        ]);
+
+        setReportCampaigns(Array.isArray(campaignRows) ? campaignRows : []);
+        setDaily(Array.isArray(dailyRows) ? dailyRows : []);
+      } else {
+        const detailRes = await fetch(
+          `/api/meta/campaign-detail?campaign_id=${encodeURIComponent(selectedCampaignId)}&date_preset=last_30d&since=${range.since}&until=${range.until}`,
+        );
+        if (!detailRes.ok) {
+          throw new Error("キャンペーンレポートの取得に失敗しました");
+        }
+
+        const detail = (await detailRes.json()) as CampaignDetailResponse;
+        const campaign = detail.campaign;
+
+        setReportCampaigns([
+          {
+            ...campaign,
+            impressions: campaign.impressions,
+            clicks: campaign.clicks,
+            spend: campaign.spend,
+            ctr: campaign.ctr,
+            cpc: campaign.cv > 0 ? String(campaign.cpa) : "0",
+            date_start: "",
+            date_stop: "",
+            actions: [{ action_type: "offsite_conversion.fb_pixel_custom", value: String(campaign.cv) }],
+          },
+        ] as MetaCampaignInsights[]);
+
+        setDaily(Array.isArray(detail.daily) ? detail.daily : []);
       }
-
-      const [campaignRows, dailyRows] = await Promise.all([
-        campaignsRes.json() as Promise<MetaCampaignInsights[]>,
-        dailyRes.json() as Promise<DailyRow[]>,
-      ]);
-
-      setCampaigns(Array.isArray(campaignRows) ? campaignRows : []);
-      setDaily(Array.isArray(dailyRows) ? dailyRows : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "レポート取得エラー");
-      setCampaigns([]);
+      setReportCampaigns([]);
       setDaily([]);
     } finally {
       setLoading(false);
@@ -162,7 +208,7 @@ export default function ReportsPage() {
       jsPDFCtor = (jspdfModule as { default?: any }).default;
       html2canvasFn = (html2canvasModule as { default?: any }).default;
     } catch {
-      setError("PDFライブラリの読み込みに失敗しました。依存関係をインストールしてください。");
+      setError("PDFライブラリの読み込みに失敗しました。依存関係を確認してください。");
       return;
     }
 
@@ -173,7 +219,7 @@ export default function ReportsPage() {
     const height = (canvas.height * width) / canvas.width;
 
     pdf.addImage(imageData, "PNG", 0, 0, width, height);
-    pdf.save(`meta_report_${period}.pdf`);
+    pdf.save(`meta_report_${period}_${selectedCampaignId}.pdf`);
   };
 
   const onDownloadCsv = () => {
@@ -182,43 +228,51 @@ export default function ReportsPage() {
       const spend = Number.parseFloat(row.spend || "0") || 0;
       const impressions = Number.parseFloat(row.impressions || "0") || 0;
       const clicks = Number.parseFloat(row.clicks || "0") || 0;
-      const ctr = Number.parseFloat(row.ctr || "0") || 0;
-      const cv = row.cv || 0;
+      const rowCtr = Number.parseFloat(row.ctr || "0") || 0;
+      const cv = row.cv ?? actionValue(row.actions, "offsite_conversion.fb_pixel_custom");
       rows.push([
         row.date_start,
         String(Math.round(spend)),
         String(Math.round(impressions)),
         String(Math.round(clicks)),
-        ctr.toFixed(1),
+        rowCtr.toFixed(1),
         String(Math.round(cv)),
       ]);
     });
+
     rows.push([]);
     rows.push(["キャンペーン", "消化額", "IMP", "クリック", "CTR", "CV"]);
-    campaigns.forEach((row) => {
-      const cv = row.actions?.find((a) => a.action_type === "offsite_conversion.fb_pixel_custom")?.value || "0";
-      rows.push([row.campaign_name, row.spend, row.impressions, row.clicks, row.ctr, cv]);
+    reportCampaigns.forEach((row) => {
+      rows.push([
+        row.campaign_name,
+        row.spend,
+        row.impressions,
+        row.clicks,
+        row.ctr,
+        String(campaignCv(row)),
+      ]);
     });
 
-    downloadCSV(`meta_report_${period}.csv`, rows);
+    downloadCSV(`meta_report_${period}_${selectedCampaignId}.csv`, rows);
   };
 
   return (
     <div className="space-y-6">
       <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <h2 className="text-2xl font-bold text-navy">レポート生成</h2>
-        <p className="mt-1 text-sm text-gray-500">月次レポートをPDF/CSVで出力します</p>
+        <p className="mt-1 text-sm text-gray-500">デジタルゴリラ固定アカウントの月次レポートを出力します</p>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="text-sm text-gray-700">
-            アカウント
+            対象キャンペーン
             <select
-              value={accountId}
-              onChange={(event) => setAccountId(event.target.value)}
+              value={selectedCampaignId}
+              onChange={(event) => setSelectedCampaignId(event.target.value)}
               className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
             >
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
+              <option value="all">全キャンペーン</option>
+              {campaigns.map((campaign) => (
+                <option key={campaign.campaign_id} value={campaign.campaign_id}>
+                  {campaign.campaign_name}
                 </option>
               ))}
             </select>
@@ -257,7 +311,7 @@ export default function ReportsPage() {
         <header>
           <h3 className="text-xl font-bold text-navy">Meta Ads 月次レポート</h3>
           <p className="mt-1 text-sm text-gray-500">
-            {selectedAccount?.name || "未選択"} / {period}
+            {selectedCampaignName} / {period}
           </p>
         </header>
 
@@ -282,7 +336,13 @@ export default function ReportsPage() {
 
         <div className="h-72 rounded-lg border border-gray-200 p-3">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={daily}>
+            <LineChart
+              data={daily.map((row) => ({
+                ...row,
+                spend: Number.parseFloat(row.spend || "0") || 0,
+                cv: row.cv ?? actionValue(row.actions, "offsite_conversion.fb_pixel_custom"),
+              }))}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="date_start" tick={{ fill: "#64748B", fontSize: 12 }} />
               <YAxis
@@ -318,16 +378,18 @@ export default function ReportsPage() {
                 <th className="px-3 py-2 text-left font-medium">IMP</th>
                 <th className="px-3 py-2 text-left font-medium">クリック</th>
                 <th className="px-3 py-2 text-left font-medium">CTR</th>
+                <th className="px-3 py-2 text-left font-medium">CV</th>
               </tr>
             </thead>
             <tbody>
-              {campaigns.map((campaign, index) => (
+              {reportCampaigns.map((campaign, index) => (
                 <tr key={campaign.campaign_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
                   <td className="px-3 py-2 font-medium text-navy">{campaign.campaign_name}</td>
                   <td className="px-3 py-2 tabular-nums">{formatCurrency(Number.parseFloat(campaign.spend || "0") || 0)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(Number.parseFloat(campaign.impressions || "0") || 0)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(Number.parseFloat(campaign.clicks || "0") || 0)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatPercent(Number.parseFloat(campaign.ctr || "0") || 0)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatNumber(campaignCv(campaign))}</td>
                 </tr>
               ))}
             </tbody>

@@ -6,8 +6,6 @@ import { signOut, useSession } from "next-auth/react";
 
 const navItems = [
   { href: "/dashboard", label: "ダッシュボード", icon: "📊" },
-  { href: "/dashboard/compare", label: "媒体比較", icon: "⚖️" },
-  { href: "/dashboard/alerts", label: "アラート", icon: "🔔" },
   { href: "/dashboard/reports", label: "レポート", icon: "📄" },
 ];
 

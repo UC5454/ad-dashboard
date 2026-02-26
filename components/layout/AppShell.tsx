@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import Sidebar from "@/components/layout/Sidebar";
 
 const titles: { prefix: string; title: string }[] = [
+  { prefix: "/dashboard/settings", title: "設定" },
+  { prefix: "/dashboard/alerts", title: "アラート一覧" },
   { prefix: "/dashboard/reports", title: "レポート" },
   { prefix: "/dashboard/projects/", title: "案件詳細" },
   { prefix: "/dashboard", title: "ダッシュボード" },

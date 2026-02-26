@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { MetaInsights, MetaCreativeSummary } from "@/types/meta";
-import { calculateBudgetProgress, DEFAULT_BUDGETS } from "@/lib/budget";
+import { calculateBudgetProgress } from "@/lib/budget";
 import { generateAlerts } from "@/lib/alerts";
+import { DEFAULT_SETTINGS, loadSettings } from "@/lib/settings";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 
@@ -50,6 +51,11 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showDailyTable, setShowDailyTable] = useState(false);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    setSettings(loadSettings());
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -124,9 +130,9 @@ export default function DashboardPage() {
   const budgetRows = useMemo(() => {
     return sortedProjects.map((project) => ({
       ...project,
-      progress: calculateBudgetProgress(project.name, project.spend),
+      progress: calculateBudgetProgress(project.name, project.spend, settings.budgets, settings.defaultFeeRate),
     }));
-  }, [sortedProjects]);
+  }, [sortedProjects, settings]);
 
   const alertRows = useMemo(() => {
     const normalizedDaily = daily.map((row) => ({
@@ -152,9 +158,10 @@ export default function DashboardPage() {
         cv: creative.cv,
         ctr: creative.ctr,
       })),
-      DEFAULT_BUDGETS,
+      settings.budgets.map((budget) => ({ projectName: budget.projectName, monthlyBudget: budget.monthlyBudget })),
+      settings.alertThresholds,
     );
-  }, [projects, daily, creatives]);
+  }, [projects, daily, creatives, settings]);
 
   const dailyRows = useMemo(() => {
     return [...daily]
@@ -189,6 +196,12 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {alertRows.length > 0 && (
         <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-navy">最新アラート</h3>
+            <Link href="/dashboard/alerts" className="text-xs text-blue hover:text-blue-light hover:underline">
+              全てのアラートを見る →
+            </Link>
+          </div>
           {alertRows.map((alert, index) => {
             const colorClass =
               alert.type === "critical"
@@ -209,7 +222,7 @@ export default function DashboardPage() {
         </section>
       )}
 
-      <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <h2 className="text-2xl font-bold text-navy">デジタルゴリラ ダッシュボード</h2>
@@ -234,34 +247,100 @@ export default function DashboardPage() {
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      <section className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">総消化額</p>
-          <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{formatCurrency(summary.spend)}</p>
+          <div className="flex items-center justify-between text-sm text-gray-500">
+            <span>総消化額</span>
+            <span className="rounded-full bg-blue/10 p-1 text-blue">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v18m-7-7h14" />
+              </svg>
+            </span>
+          </div>
+          <p className={`mt-2 text-2xl font-bold tabular-nums ${summary.spend === 0 ? "text-gray-400" : "text-navy"}`}>
+            {formatCurrency(summary.spend)}
+          </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">総CV</p>
-          <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{formatNumber(summary.cv)}</p>
+          <div className="flex items-center justify-between text-sm text-gray-500">
+            <span>総CV</span>
+            <span className="rounded-full bg-blue/10 p-1 text-blue">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h5l2-3 3 6 2-3h4" />
+              </svg>
+            </span>
+          </div>
+          <p className={`mt-2 text-2xl font-bold tabular-nums ${summary.cv === 0 ? "text-gray-400" : "text-navy"}`}>
+            {formatNumber(summary.cv)}
+          </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">平均CPA</p>
-          <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{summary.cv > 0 ? formatCurrency(cpa) : "-"}</p>
+          <div className="flex items-center justify-between text-sm text-gray-500">
+            <span>平均CPA</span>
+            <span className="rounded-full bg-blue/10 p-1 text-blue">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <circle cx="12" cy="12" r="8" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 2" />
+              </svg>
+            </span>
+          </div>
+          <p className={`mt-2 text-2xl font-bold tabular-nums ${summary.cv === 0 ? "text-gray-400" : "text-navy"}`}>
+            {summary.cv > 0 ? formatCurrency(cpa) : "-"}
+          </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">CTR</p>
-          <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{formatPercent(ctr)}</p>
+          <div className="flex items-center justify-between text-sm text-gray-500">
+            <span>CTR</span>
+            <span className="rounded-full bg-blue/10 p-1 text-blue">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 17l6-6 4 4 6-7" />
+              </svg>
+            </span>
+          </div>
+          <p className={`mt-2 text-2xl font-bold tabular-nums ${ctr === 0 ? "text-gray-400" : "text-navy"}`}>
+            {formatPercent(ctr)}
+          </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">平均CPC</p>
-          <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{summary.clicks > 0 ? formatCurrency(cpc) : "-"}</p>
+          <div className="flex items-center justify-between text-sm text-gray-500">
+            <span>平均CPC</span>
+            <span className="rounded-full bg-blue/10 p-1 text-blue">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h10v10H7z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9h6v6H9z" />
+              </svg>
+            </span>
+          </div>
+          <p className={`mt-2 text-2xl font-bold tabular-nums ${summary.clicks === 0 ? "text-gray-400" : "text-navy"}`}>
+            {summary.clicks > 0 ? formatCurrency(cpc) : "-"}
+          </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">総クリック数</p>
-          <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{formatNumber(summary.clicks)}</p>
+          <div className="flex items-center justify-between text-sm text-gray-500">
+            <span>総クリック数</span>
+            <span className="rounded-full bg-blue/10 p-1 text-blue">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h10l-5 10-5-10Z" />
+              </svg>
+            </span>
+          </div>
+          <p className={`mt-2 text-2xl font-bold tabular-nums ${summary.clicks === 0 ? "text-gray-400" : "text-navy"}`}>
+            {formatNumber(summary.clicks)}
+          </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">総IMP</p>
-          <p className="mt-2 text-2xl font-bold text-navy tabular-nums">{formatNumber(summary.impressions)}</p>
+          <div className="flex items-center justify-between text-sm text-gray-500">
+            <span>総IMP</span>
+            <span className="rounded-full bg-blue/10 p-1 text-blue">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12s4-6 9-6 9 6 9 6-4 6-9 6-9-6-9-6Z" />
+                <circle cx="12" cy="12" r="2.5" />
+              </svg>
+            </span>
+          </div>
+          <p className={`mt-2 text-2xl font-bold tabular-nums ${summary.impressions === 0 ? "text-gray-400" : "text-navy"}`}>
+            {formatNumber(summary.impressions)}
+          </p>
         </article>
       </section>
 
@@ -296,7 +375,13 @@ export default function DashboardPage() {
                 </div>
 
                 {progress.monthlyBudget === null ? (
-                  <p className="mt-2 text-sm text-gray-500">予算が未設定のため、進捗を算出できません。</p>
+                  <p className="mt-2 text-sm text-gray-500">
+                    予算が未設定のため、進捗を算出できません。{" "}
+                    <Link href="/dashboard/settings" className="text-blue hover:text-blue-light hover:underline">
+                      設定画面
+                    </Link>
+                    で予算を設定できます。
+                  </p>
                 ) : (
                   <>
                     <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-gray-100">
@@ -380,7 +465,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => setShowDailyTable((prev) => !prev)}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+            className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             {showDailyTable ? "日次データを閉じる" : "日次データを表示"}
           </button>

@@ -27,19 +27,26 @@ export interface BudgetProgress {
   paceStatus: "under" | "on-track" | "over";
 }
 
-export function calculateBudgetProgress(projectName: string, currentSpend: number): BudgetProgress {
-  const config = DEFAULT_BUDGETS.find((budget) => budget.projectName === projectName);
+export function calculateBudgetProgress(
+  projectName: string,
+  currentSpend: number,
+  budgets?: BudgetConfig[],
+  defaultFeeRate?: number,
+): BudgetProgress {
+  const budgetList = budgets ?? DEFAULT_BUDGETS;
+  const fallbackFeeRate = defaultFeeRate ?? DEFAULT_FEE_RATE;
+  const config = budgetList.find((budget) => budget.projectName === projectName);
   const now = new Date();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const daysElapsed = now.getDate();
   const idealRate = (daysElapsed / daysInMonth) * 100;
 
   if (!config) {
-    const spendWithFee = currentSpend * (1 + DEFAULT_FEE_RATE);
+    const spendWithFee = currentSpend * (1 + fallbackFeeRate);
     return {
       monthlyBudget: null,
       currentSpend,
-      feeRate: DEFAULT_FEE_RATE,
+      feeRate: fallbackFeeRate,
       spendWithFee,
       consumptionRate: null,
       remainingBudget: null,

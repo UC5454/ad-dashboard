@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculateBudgetProgress } from "@/lib/budget";
+import { DEFAULT_SETTINGS, loadSettings } from "@/lib/settings";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 type AiTab = "overall" | "daily" | "creative";
@@ -119,6 +120,11 @@ export default function ProjectDetailPage() {
   const [detail, setDetail] = useState<ProjectDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    setSettings(loadSettings());
+  }, []);
 
   useEffect(() => {
     if (!projectId) return;
@@ -176,8 +182,13 @@ export default function ProjectDetailPage() {
   const worstCreativeId = rankedCreatives[rankedCreatives.length - 1]?.ad_id;
   const budgetProgress = useMemo(() => {
     if (!detail) return null;
-    return calculateBudgetProgress(detail.project.name, detail.project.spend);
-  }, [detail]);
+    return calculateBudgetProgress(
+      detail.project.name,
+      detail.project.spend,
+      settings.budgets,
+      settings.defaultFeeRate,
+    );
+  }, [detail, settings]);
   const projectCpc = detail && detail.project.clicks > 0 ? detail.project.spend / detail.project.clicks : 0;
   const dailyChartRows = useMemo(() => {
     if (!detail) return [];
@@ -226,7 +237,7 @@ export default function ProjectDetailPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <section className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-7">
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">消化額</p>
           <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
@@ -264,7 +275,13 @@ export default function ProjectDetailPage() {
         <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <h3 className="mb-3 text-base font-semibold text-navy">予算進捗</h3>
           {budgetProgress.monthlyBudget === null ? (
-            <p className="text-sm text-gray-500">予算未設定のため、進捗を算出できません。</p>
+            <p className="text-sm text-gray-500">
+              予算未設定のため、進捗を算出できません。{" "}
+              <Link href="/dashboard/settings" className="text-blue hover:text-blue-light hover:underline">
+                設定画面
+              </Link>
+              で予算を設定できます。
+            </p>
           ) : (
             <>
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">

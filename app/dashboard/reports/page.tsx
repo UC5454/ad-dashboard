@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculateBudgetProgress } from "@/lib/budget";
+import { DEFAULT_SETTINGS, loadSettings } from "@/lib/settings";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 
@@ -120,6 +121,11 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [bootLoading, setBootLoading] = useState(false);
   const [error, setError] = useState("");
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    setSettings(loadSettings());
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -161,8 +167,13 @@ export default function ReportsPage() {
 
   const budgetProgress = useMemo(() => {
     if (!detail) return null;
-    return calculateBudgetProgress(detail.project.name, detail.project.spend);
-  }, [detail]);
+    return calculateBudgetProgress(
+      detail.project.name,
+      detail.project.spend,
+      settings.budgets,
+      settings.defaultFeeRate,
+    );
+  }, [detail, settings]);
 
   const onLoadReport = async () => {
     if (!selectedProjectId) {
@@ -276,7 +287,7 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <h2 className="text-2xl font-bold text-navy">レポート生成</h2>
         <p className="mt-1 text-sm text-gray-500">案件単位のレポートを生成します</p>
 
@@ -332,7 +343,7 @@ export default function ReportsPage() {
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
       </section>
 
-      <section id="report-preview" className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+      <section id="report-preview" className="space-y-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <header>
           <h3 className="text-xl font-bold text-navy">案件レポート</h3>
           <p className="mt-1 text-sm text-gray-500">

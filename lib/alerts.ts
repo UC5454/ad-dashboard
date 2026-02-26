@@ -6,6 +6,19 @@ export interface Alert {
   projectName?: string;
 }
 
+export interface AlertThresholds {
+  budgetOverRate: number;
+  budgetPaceLagRate: number;
+  projectedOverMultiplier: number;
+  cpaHighMultiplier: number;
+  cvDropRate: number;
+  cpcSpikeMultiplier: number;
+  cpcDropRate: number;
+  cpmSpikeMultiplier: number;
+  zeroConvSpendThreshold: number;
+  impDropRate: number;
+}
+
 interface ProjectInput {
   name: string;
   spend: number;
@@ -34,6 +47,19 @@ interface BudgetInput {
   monthlyBudget: number;
 }
 
+const DEFAULT_THRESHOLDS: AlertThresholds = {
+  budgetOverRate: 90,
+  budgetPaceLagRate: 70,
+  projectedOverMultiplier: 1.1,
+  cpaHighMultiplier: 1.5,
+  cvDropRate: 50,
+  cpcSpikeMultiplier: 2.0,
+  cpcDropRate: 50,
+  cpmSpikeMultiplier: 2.0,
+  zeroConvSpendThreshold: 5000,
+  impDropRate: 30,
+};
+
 function getBudget(projectName: string, budgets: BudgetInput[]): BudgetInput | undefined {
   return budgets.find((budget) => budget.projectName === projectName);
 }
@@ -51,8 +77,10 @@ export function generateAlerts(
   daily: DailyInput[],
   creatives: CreativeInput[],
   budgets: BudgetInput[],
+  thresholds?: Partial<AlertThresholds>,
 ): Alert[] {
   const alerts: Alert[] = [];
+  const t = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const { idealRate, daysElapsed, daysInMonth } = calcIdealRate();
 
   projects.forEach((project) => {
@@ -62,7 +90,7 @@ export function generateAlerts(
     const consumptionRate = (project.spend / budget.monthlyBudget) * 100;
     const projectedSpend = daysElapsed > 0 ? (project.spend / daysElapsed) * daysInMonth : 0;
 
-    if (consumptionRate > 90) {
+    if (consumptionRate > t.budgetOverRate) {
       alerts.push({
         type: "critical",
         category: "budget",
@@ -72,22 +100,22 @@ export function generateAlerts(
       });
     }
 
-    if (consumptionRate < idealRate * 0.7) {
+    if (consumptionRate < idealRate * (t.budgetPaceLagRate / 100)) {
       alerts.push({
         type: "warning",
         category: "budget",
         title: "予算ペース遅れ",
-        message: `${project.name}の消化率が理想進捗の70%未満です。`,
+        message: `${project.name}の消化率が理想進捗の${t.budgetPaceLagRate}%未満です。`,
         projectName: project.name,
       });
     }
 
-    if (projectedSpend > budget.monthlyBudget * 1.1) {
+    if (projectedSpend > budget.monthlyBudget * t.projectedOverMultiplier) {
       alerts.push({
         type: "warning",
         category: "budget",
         title: "着地予想超過",
-        message: `${project.name}の着地予想が月間予算を10%以上上回る見込みです。`,
+        message: `${project.name}の着地予想が月間予算の${t.projectedOverMultiplier.toFixed(1)}倍を上回る見込みです。`,
         projectName: project.name,
       });
     }
@@ -100,12 +128,12 @@ export function generateAlerts(
   if (avgCpa > 0) {
     projects.forEach((project) => {
       if (project.cv <= 0) return;
-      if (project.cpa >= avgCpa * 1.5) {
+      if (project.cpa >= avgCpa * t.cpaHighMultiplier) {
         alerts.push({
           type: "warning",
           category: "performance",
           title: "CPA高騰",
-          message: `${project.name}のCPAが全体平均の1.5倍以上です。`,
+          message: `${project.name}のCPAが全体平均の${t.cpaHighMultiplier.toFixed(1)}倍以上です。`,
           projectName: project.name,
         });
       }
@@ -117,12 +145,12 @@ export function generateAlerts(
     const latest = sortedDaily[sortedDaily.length - 1];
     const recent = sortedDaily.slice(-4, -1);
     const avgCv = recent.reduce((sum, row) => sum + (row.cv || 0), 0) / recent.length;
-    if (avgCv > 0 && latest.cv <= avgCv * 0.5) {
+    if (avgCv > 0 && latest.cv <= avgCv * (t.cvDropRate / 100)) {
       alerts.push({
         type: "warning",
         category: "performance",
         title: "CV急減",
-        message: "直近日のCVが3日平均の50%以下です。",
+        message: `直近日のCVが3日平均の${t.cvDropRate}%以下です。`,
       });
     }
   }
@@ -130,12 +158,15 @@ export function generateAlerts(
   if (sortedDaily.length >= 2) {
     const latest = sortedDaily[sortedDaily.length - 1];
     const previous = sortedDaily[sortedDaily.length - 2];
-    if ((previous.impressions ?? 0) > 0 && (latest.impressions ?? 0) <= (previous.impressions ?? 0) * 0.3) {
+    if (
+      (previous.impressions ?? 0) > 0 &&
+      (latest.impressions ?? 0) <= (previous.impressions ?? 0) * (t.impDropRate / 100)
+    ) {
       alerts.push({
         type: "info",
         category: "performance",
         title: "配信停滞",
-        message: "直近日のIMPが前日比30%以下です。",
+        message: `直近日のIMPが前日比${t.impDropRate}%以下です。`,
       });
     }
   }
@@ -153,21 +184,21 @@ export function generateAlerts(
         return sum + (clicks > 0 ? row.spend / clicks : 0);
       }, 0) / recent.length;
 
-    if (latestClicks > 0 && avgCpc > 0 && latestCpc >= avgCpc * 2) {
+    if (latestClicks > 0 && avgCpc > 0 && latestCpc >= avgCpc * t.cpcSpikeMultiplier) {
       alerts.push({
         type: "warning",
         category: "performance",
         title: "CPC急騰",
-        message: `直近日のCPCが¥${Math.round(latestCpc).toLocaleString("ja-JP")}で、3日平均¥${Math.round(avgCpc).toLocaleString("ja-JP")}の2倍以上です。入札・ターゲティングを確認してください。`,
+        message: `直近日のCPCが¥${Math.round(latestCpc).toLocaleString("ja-JP")}で、3日平均¥${Math.round(avgCpc).toLocaleString("ja-JP")}の${t.cpcSpikeMultiplier.toFixed(1)}倍以上です。入札・ターゲティングを確認してください。`,
       });
     }
 
-    if (latestClicks > 0 && avgCpc > 0 && latestCpc <= avgCpc * 0.5) {
+    if (latestClicks > 0 && avgCpc > 0 && latestCpc <= avgCpc * (t.cpcDropRate / 100)) {
       alerts.push({
         type: "info",
         category: "performance",
         title: "CPC急落",
-        message: `直近日のCPCが¥${Math.round(latestCpc).toLocaleString("ja-JP")}で、3日平均¥${Math.round(avgCpc).toLocaleString("ja-JP")}の50%以下です。品質向上の可能性があります。`,
+        message: `直近日のCPCが¥${Math.round(latestCpc).toLocaleString("ja-JP")}で、3日平均¥${Math.round(avgCpc).toLocaleString("ja-JP")}の${t.cpcDropRate}%以下です。品質向上の可能性があります。`,
       });
     }
 
@@ -178,12 +209,12 @@ export function generateAlerts(
         return sum + (impressions > 0 ? (row.spend / impressions) * 1000 : 0);
       }, 0) / recent.length;
 
-    if (latestImpressions > 0 && avgCpm > 0 && latestCpm >= avgCpm * 2) {
+    if (latestImpressions > 0 && avgCpm > 0 && latestCpm >= avgCpm * t.cpmSpikeMultiplier) {
       alerts.push({
         type: "warning",
         category: "performance",
         title: "CPM急騰",
-        message: `直近日のCPMが¥${Math.round(latestCpm).toLocaleString("ja-JP")}で、3日平均の2倍以上です。競合状況やオーディエンス設定を確認してください。`,
+        message: `直近日のCPMが¥${Math.round(latestCpm).toLocaleString("ja-JP")}で、3日平均の${t.cpmSpikeMultiplier.toFixed(1)}倍以上です。競合状況やオーディエンス設定を確認してください。`,
       });
     }
   }
@@ -202,7 +233,7 @@ export function generateAlerts(
   }
 
   creatives.forEach((creative) => {
-    if (creative.cv === 0 && creative.spend >= 5000) {
+    if (creative.cv === 0 && creative.spend >= t.zeroConvSpendThreshold) {
       alerts.push({
         type: "critical",
         category: "creative",

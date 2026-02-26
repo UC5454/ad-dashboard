@@ -188,32 +188,53 @@ export default function AlertsPage() {
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      <section className="space-y-4">
-        {filteredAlerts.map((alert, index) => {
-          const colorClass =
-            alert.type === "critical"
-              ? "border-red-300 bg-red-50 text-red-800"
-              : alert.type === "warning"
-                ? "border-amber-300 bg-amber-50 text-amber-800"
-                : "border-blue-300 bg-blue-50 text-blue-800";
-          return (
-            <article key={`${alert.title}-${index}`} className={`rounded-xl border p-4 ${colorClass}`}>
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded-full bg-white/80 px-2 py-0.5 font-semibold uppercase">{alert.type}</span>
-                <span className="rounded-full bg-white/80 px-2 py-0.5">{categoryLabel(alert.category)}</span>
-                {alert.projectName && (
-                  <span className="rounded-full bg-white/80 px-2 py-0.5">{alert.projectName}</span>
-                )}
-              </div>
-              <h3 className="mt-2 text-base font-semibold">{alert.title}</h3>
-              <p className="mt-1 text-sm">{alert.message}</p>
-            </article>
-          );
-        })}
-
-        {filteredAlerts.length === 0 && !error && (
-          <div className="rounded-xl border border-gray-200 bg-white p-5 text-sm text-gray-500 shadow-sm">
-            現在アラートはありません。全ての指標は正常範囲内です。
+      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        {filteredAlerts.length === 0 && !error ? (
+          <div className="text-sm text-gray-500">現在アラートはありません。全ての指標は正常範囲内です。</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="bg-gray-50 text-xs text-gray-500">
+                <tr>
+                  <th className="w-24 px-3 py-2 text-left font-medium">重要度</th>
+                  <th className="w-28 px-3 py-2 text-left font-medium">カテゴリ</th>
+                  <th className="px-3 py-2 text-left font-medium">案件</th>
+                  <th className="px-3 py-2 text-left font-medium">内容</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAlerts.map((alert, index) => {
+                  const textColor =
+                    alert.type === "critical"
+                      ? "text-red-700"
+                      : alert.type === "warning"
+                        ? "text-amber-700"
+                        : "text-blue-700";
+                  const dotColor =
+                    alert.type === "critical" ? "bg-red-500" : alert.type === "warning" ? "bg-amber-500" : "bg-blue-500";
+                  return (
+                    <tr key={`${alert.title}-${index}`} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      <td className="px-3 py-2.5">
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${textColor}`}>
+                          <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                          {alert.type}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                          {categoryLabel(alert.category)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-gray-600">{alert.projectName || "-"}</td>
+                      <td className="px-3 py-2.5">
+                        <p className="text-sm font-medium text-navy">{alert.title}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">{alert.message}</p>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </section>

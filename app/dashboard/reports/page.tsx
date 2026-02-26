@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { calculateBudgetProgress } from "@/lib/budget";
-import { DEFAULT_SETTINGS, loadSettings } from "@/lib/settings";
+import { applyFee, calculateBudgetProgress } from "@/lib/budget";
+import { DEFAULT_SETTINGS, loadSettings, type FeeCalcMethod } from "@/lib/settings";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 
@@ -97,6 +97,10 @@ function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
+function feeLabel(method: FeeCalcMethod): string {
+  return method === "margin" ? "Fee込(内掛)" : "Fee込(外掛)";
+}
+
 function downloadCSV(filename: string, rows: string[][]) {
   const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -172,8 +176,11 @@ export default function ReportsPage() {
       detail.project.spend,
       settings.budgets,
       settings.defaultFeeRate,
+      settings.feeCalcMethod,
     );
   }, [detail, settings]);
+  const feeLabelText = feeLabel(settings.feeCalcMethod);
+  const feeRate = budgetProgress?.feeRate ?? settings.defaultFeeRate;
 
   const onLoadReport = async () => {
     if (!selectedProjectId) {
@@ -234,12 +241,14 @@ export default function ReportsPage() {
   const onDownloadCsv = () => {
     if (!detail) return;
 
-    const rows: string[][] = [["日付", "消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]];
+    const rows: string[][] = [["日付", "消化額", "Fee込消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]];
     detail.daily.forEach((row) => {
       const cpc = row.clicks > 0 ? row.spend / row.clicks : 0;
+      const spendWithFee = applyFee(row.spend, feeRate, settings.feeCalcMethod);
       rows.push([
         row.date_start,
         String(Math.round(row.spend)),
+        String(Math.round(spendWithFee)),
         String(Math.round(row.impressions)),
         String(Math.round(row.clicks)),
         row.ctr.toFixed(1),
@@ -250,12 +259,14 @@ export default function ReportsPage() {
     });
 
     rows.push([]);
-    rows.push(["キャンペーン", "消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]);
+    rows.push(["キャンペーン", "消化額", "Fee込消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]);
     detail.campaigns.forEach((row) => {
       const cpc = row.clicks > 0 ? row.spend / row.clicks : 0;
+      const spendWithFee = applyFee(row.spend, feeRate, settings.feeCalcMethod);
       rows.push([
         row.campaign_name,
         String(Math.round(row.spend)),
+        String(Math.round(spendWithFee)),
         String(Math.round(row.impressions)),
         String(Math.round(row.clicks)),
         row.ctr.toFixed(1),
@@ -266,13 +277,15 @@ export default function ReportsPage() {
     });
 
     rows.push([]);
-    rows.push(["クリエイティブ", "キャンペーン", "消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]);
+    rows.push(["クリエイティブ", "キャンペーン", "消化額", "Fee込消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]);
     detail.creatives.forEach((row) => {
       const cpc = row.clicks > 0 ? row.spend / row.clicks : 0;
+      const spendWithFee = applyFee(row.spend, feeRate, settings.feeCalcMethod);
       rows.push([
         row.creative_name,
         row.campaign_name,
         String(Math.round(row.spend)),
+        String(Math.round(spendWithFee)),
         String(Math.round(row.impressions)),
         String(Math.round(row.clicks)),
         row.ctr.toFixed(1),
@@ -357,7 +370,9 @@ export default function ReportsPage() {
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs text-gray-500">消化額</p>
                 <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
-                <p className="mt-1 text-xs text-gray-500">Fee込: {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {feeLabelText}: {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}
+                </p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs text-gray-500">CV</p>
@@ -407,7 +422,9 @@ export default function ReportsPage() {
                       />
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600">
-                      <span className="tabular-nums">Fee込: {formatCurrency(budgetProgress.spendWithFee)}</span>
+                      <span className="tabular-nums">
+                        {feeLabelText}: {formatCurrency(budgetProgress.spendWithFee)}
+                      </span>
                       <span className="tabular-nums">理想: {formatPercent(budgetProgress.idealRate)}</span>
                       <span className="tabular-nums">
                         実績: {formatPercent(budgetProgress.consumptionRate ?? 0)}
@@ -416,7 +433,7 @@ export default function ReportsPage() {
                         着地予想: {budgetProgress.projectedSpend ? formatCurrency(budgetProgress.projectedSpend) : "-"}
                       </span>
                       <span className="tabular-nums">
-                        Fee込着地: {budgetProgress.projectedSpendWithFee ? formatCurrency(budgetProgress.projectedSpendWithFee) : "-"}
+                        {feeLabelText}着地: {budgetProgress.projectedSpendWithFee ? formatCurrency(budgetProgress.projectedSpendWithFee) : "-"}
                       </span>
                       <span className="tabular-nums">
                         残予算: {budgetProgress.remainingBudget !== null ? formatCurrency(budgetProgress.remainingBudget) : "-"}
@@ -508,6 +525,7 @@ export default function ReportsPage() {
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">日付</th>
                     <th className="px-3 py-2 text-left font-medium">消化額</th>
+                    <th className="px-3 py-2 text-left font-medium">{feeLabelText}</th>
                     <th className="px-3 py-2 text-left font-medium">IMP</th>
                     <th className="px-3 py-2 text-left font-medium">クリック</th>
                     <th className="px-3 py-2 text-left font-medium">CTR</th>
@@ -521,6 +539,9 @@ export default function ReportsPage() {
                     <tr key={`${row.date_start}-${index}`} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
                       <td className="px-3 py-2">{row.date_start}</td>
                       <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                      <td className="px-3 py-2 tabular-nums">
+                        {formatCurrency(applyFee(row.spend, feeRate, settings.feeCalcMethod))}
+                      </td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>

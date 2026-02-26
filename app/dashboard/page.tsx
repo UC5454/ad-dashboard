@@ -6,7 +6,7 @@ import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAx
 import type { MetaInsights, MetaCreativeSummary } from "@/types/meta";
 import { calculateBudgetProgress } from "@/lib/budget";
 import { generateAlerts } from "@/lib/alerts";
-import { DEFAULT_SETTINGS, loadSettings } from "@/lib/settings";
+import { DEFAULT_SETTINGS, loadSettings, type FeeCalcMethod } from "@/lib/settings";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 
@@ -41,6 +41,10 @@ function formatPercent(value: number): string {
 
 function toNumber(value: string | number | null | undefined): number {
   return Number.parseFloat(String(value ?? "0")) || 0;
+}
+
+function feeLabel(method: FeeCalcMethod): string {
+  return method === "margin" ? "Fee込(内掛)" : "Fee込(外掛)";
 }
 
 export default function DashboardPage() {
@@ -130,9 +134,21 @@ export default function DashboardPage() {
   const budgetRows = useMemo(() => {
     return sortedProjects.map((project) => ({
       ...project,
-      progress: calculateBudgetProgress(project.name, project.spend, settings.budgets, settings.defaultFeeRate),
+      progress: calculateBudgetProgress(
+        project.name,
+        project.spend,
+        settings.budgets,
+        settings.defaultFeeRate,
+        settings.feeCalcMethod,
+      ),
     }));
   }, [sortedProjects, settings]);
+
+  const totalSpendWithFee = useMemo(() => {
+    return budgetRows.reduce((sum, row) => sum + row.progress.spendWithFee, 0);
+  }, [budgetRows]);
+
+  const feeLabelText = feeLabel(settings.feeCalcMethod);
 
   const alertRows = useMemo(() => {
     const normalizedDaily = daily.map((row) => ({
@@ -195,30 +211,38 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {alertRows.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-navy">最新アラート</h3>
+        <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-navy">アラート</h3>
+              <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                {alertRows.length}
+              </span>
+            </div>
             <Link href="/dashboard/alerts" className="text-xs text-blue hover:text-blue-light hover:underline">
-              全てのアラートを見る →
+              全て見る →
             </Link>
           </div>
-          {alertRows.map((alert, index) => {
-            const colorClass =
-              alert.type === "critical"
-                ? "border-red-500 bg-red-50 text-red-800"
-                : alert.type === "warning"
-                  ? "border-amber-500 bg-amber-50 text-amber-800"
-                  : "border-blue-500 bg-blue-50 text-blue-800";
-            return (
-              <div key={`${alert.title}-${index}`} className={`rounded-lg border-l-4 px-4 py-3 ${colorClass}`}>
-                <p className="text-sm font-semibold">{alert.title}</p>
-                <p className="text-sm">
-                  {alert.projectName ? `${alert.projectName} / ` : ""}
-                  {alert.message}
-                </p>
-              </div>
-            );
-          })}
+          <div className="space-y-2">
+            {alertRows.slice(0, 3).map((alert, index) => {
+              const dotColor =
+                alert.type === "critical" ? "bg-red-500" : alert.type === "warning" ? "bg-amber-500" : "bg-blue-500";
+              return (
+                <div key={`${alert.title}-${index}`} className="flex items-start gap-2 text-sm">
+                  <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
+                  <div className="min-w-0">
+                    <span className="font-medium text-navy">{alert.title}</span>
+                    {alert.projectName && <span className="text-gray-500"> / {alert.projectName}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {alertRows.length > 3 && (
+            <Link href="/dashboard/alerts" className="mt-2 block text-xs text-gray-500 hover:text-blue">
+              他 {alertRows.length - 3} 件のアラート →
+            </Link>
+          )}
         </section>
       )}
 
@@ -259,6 +283,9 @@ export default function DashboardPage() {
           </div>
           <p className={`mt-2 text-2xl font-bold tabular-nums ${summary.spend === 0 ? "text-gray-400" : "text-navy"}`}>
             {formatCurrency(summary.spend)}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            {feeLabelText}: {formatCurrency(totalSpendWithFee)}
           </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -388,14 +415,16 @@ export default function DashboardPage() {
                       <div className={`h-full ${barColor}`} style={{ width: `${Math.min(rate, 130)}%` }} />
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600">
-                      <span className="tabular-nums">Fee込: {formatCurrency(progress.spendWithFee)}</span>
+                      <span className="tabular-nums">
+                        {feeLabelText}: {formatCurrency(progress.spendWithFee)}
+                      </span>
                       <span className="tabular-nums">理想: {formatPercent(progress.idealRate)}</span>
                       <span className="tabular-nums">実績: {formatPercent(rate)}</span>
                       <span className="tabular-nums">
                         着地予想: {progress.projectedSpend ? formatCurrency(progress.projectedSpend) : "-"}
                       </span>
                       <span className="tabular-nums">
-                        Fee込着地: {progress.projectedSpendWithFee ? formatCurrency(progress.projectedSpendWithFee) : "-"}
+                        {feeLabelText}着地: {progress.projectedSpendWithFee ? formatCurrency(progress.projectedSpendWithFee) : "-"}
                       </span>
                       <span className="tabular-nums">
                         残予算: {progress.remainingBudget !== null ? formatCurrency(progress.remainingBudget) : "-"}
@@ -544,7 +573,9 @@ export default function DashboardPage() {
                   </td>
                   <td className="px-3 py-2 tabular-nums">
                     <p>{formatCurrency(project.spend)}</p>
-                    <p className="text-xs text-gray-500">Fee込: {formatCurrency(project.progress.spendWithFee)}</p>
+                    <p className="text-xs text-gray-500">
+                      {feeLabelText}: {formatCurrency(project.progress.spendWithFee)}
+                    </p>
                   </td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(project.impressions)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(project.clicks)}</td>

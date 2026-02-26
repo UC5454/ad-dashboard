@@ -7,6 +7,7 @@ import {
   saveSettings,
   type AlertThresholds,
   type BudgetSetting,
+  type FeeCalcMethod,
 } from "@/lib/settings";
 
 function formatCurrency(value: number): string {
@@ -25,6 +26,7 @@ function parseNumber(value: string): number {
 export default function SettingsPage() {
   const [budgets, setBudgets] = useState<BudgetSetting[]>(DEFAULT_SETTINGS.budgets);
   const [defaultFeeRate, setDefaultFeeRate] = useState<number>(DEFAULT_SETTINGS.defaultFeeRate);
+  const [feeCalcMethod, setFeeCalcMethod] = useState<FeeCalcMethod>(DEFAULT_SETTINGS.feeCalcMethod);
   const [alertThresholds, setAlertThresholds] = useState<AlertThresholds>(DEFAULT_SETTINGS.alertThresholds);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [toast, setToast] = useState("");
@@ -33,6 +35,7 @@ export default function SettingsPage() {
     const settings = loadSettings();
     setBudgets(settings.budgets);
     setDefaultFeeRate(settings.defaultFeeRate);
+    setFeeCalcMethod(settings.feeCalcMethod);
     setAlertThresholds(settings.alertThresholds);
   }, []);
 
@@ -48,6 +51,7 @@ export default function SettingsPage() {
     saveSettings({
       budgets,
       defaultFeeRate,
+      feeCalcMethod,
       alertThresholds,
     });
     setToast("保存しました");
@@ -216,26 +220,68 @@ export default function SettingsPage() {
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h3 className="text-lg font-semibold text-navy">デフォルト手数料率</h3>
-        <p className="mt-1 text-sm text-gray-500">予算未設定の案件に適用される手数料率</p>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <input
-            type="number"
-            min={0}
-            step={0.1}
-            value={percentValue(defaultFeeRate)}
-            onChange={(event) => setDefaultFeeRate(parseNumber(event.target.value) / 100)}
-            className="w-28 rounded-lg border border-gray-200 px-3 py-2 text-sm"
-          />
-          <span className="text-sm text-gray-600">%</span>
-          <button
-            type="button"
-            onClick={onSaveAll}
-            className="rounded-lg bg-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-light"
-          >
-            保存
-          </button>
+        <h3 className="text-lg font-semibold text-navy">手数料設定</h3>
+        <p className="mt-1 text-sm text-gray-500">手数料の計算方式とデフォルト手数料率を設定します</p>
+
+        <div className="mt-4 space-y-4">
+          <div>
+            <p className="text-sm font-medium text-gray-700">計算方式</p>
+            <div className="mt-2 grid gap-3 md:grid-cols-2">
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-200 px-4 py-3 has-[:checked]:border-blue has-[:checked]:bg-blue/5">
+                <input
+                  type="radio"
+                  name="feeCalcMethod"
+                  value="markup"
+                  checked={feeCalcMethod === "markup"}
+                  onChange={() => setFeeCalcMethod("markup")}
+                />
+                <div>
+                  <p className="text-sm font-medium text-navy">外掛け（マークアップ）</p>
+                  <p className="text-xs text-gray-500">請求額 = 媒体費 × (1 + 手数料率)</p>
+                  <p className="text-xs text-gray-400">例: 100万 × 1.2 = 120万</p>
+                </div>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-200 px-4 py-3 has-[:checked]:border-blue has-[:checked]:bg-blue/5">
+                <input
+                  type="radio"
+                  name="feeCalcMethod"
+                  value="margin"
+                  checked={feeCalcMethod === "margin"}
+                  onChange={() => setFeeCalcMethod("margin")}
+                />
+                <div>
+                  <p className="text-sm font-medium text-navy">内掛け（マージン）</p>
+                  <p className="text-xs text-gray-500">請求額 = 媒体費 / (1 - 手数料率)</p>
+                  <p className="text-xs text-gray-400">例: 100万 / 0.8 = 125万</p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium text-gray-700">デフォルト手数料率</p>
+            <p className="text-xs text-gray-500">予算未設定の案件に適用される手数料率</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                value={percentValue(defaultFeeRate)}
+                onChange={(event) => setDefaultFeeRate(parseNumber(event.target.value) / 100)}
+                className="w-28 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+              />
+              <span className="text-sm text-gray-600">%</span>
+            </div>
+          </div>
         </div>
+
+        <button
+          type="button"
+          onClick={onSaveAll}
+          className="mt-4 rounded-lg bg-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-light"
+        >
+          保存
+        </button>
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">

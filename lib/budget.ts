@@ -1,3 +1,5 @@
+import type { FeeCalcMethod } from "@/lib/settings";
+
 export interface BudgetConfig {
   projectName: string;
   monthlyBudget: number;
@@ -27,14 +29,23 @@ export interface BudgetProgress {
   paceStatus: "under" | "on-track" | "over";
 }
 
+export function applyFee(amount: number, feeRate: number, method: FeeCalcMethod): number {
+  if (method === "margin") {
+    return feeRate < 1 ? amount / (1 - feeRate) : amount;
+  }
+  return amount * (1 + feeRate);
+}
+
 export function calculateBudgetProgress(
   projectName: string,
   currentSpend: number,
   budgets?: BudgetConfig[],
   defaultFeeRate?: number,
+  feeCalcMethod?: FeeCalcMethod,
 ): BudgetProgress {
   const budgetList = budgets ?? DEFAULT_BUDGETS;
   const fallbackFeeRate = defaultFeeRate ?? DEFAULT_FEE_RATE;
+  const method = feeCalcMethod ?? "markup";
   const config = budgetList.find((budget) => budget.projectName === projectName);
   const now = new Date();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -42,7 +53,7 @@ export function calculateBudgetProgress(
   const idealRate = (daysElapsed / daysInMonth) * 100;
 
   if (!config) {
-    const spendWithFee = currentSpend * (1 + fallbackFeeRate);
+    const spendWithFee = applyFee(currentSpend, fallbackFeeRate, method);
     return {
       monthlyBudget: null,
       currentSpend,
@@ -62,8 +73,8 @@ export function calculateBudgetProgress(
   const consumptionRate = (currentSpend / config.monthlyBudget) * 100;
   const remainingBudget = config.monthlyBudget - currentSpend;
   const projectedSpend = daysElapsed > 0 ? (currentSpend / daysElapsed) * daysInMonth : 0;
-  const spendWithFee = currentSpend * (1 + config.feeRate);
-  const projectedSpendWithFee = projectedSpend * (1 + config.feeRate);
+  const spendWithFee = applyFee(currentSpend, config.feeRate, method);
+  const projectedSpendWithFee = applyFee(projectedSpend, config.feeRate, method);
 
   let paceStatus: "under" | "on-track" | "over" = "on-track";
   if (consumptionRate > idealRate + 10) paceStatus = "over";

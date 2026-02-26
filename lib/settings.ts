@@ -6,6 +6,8 @@ export interface BudgetSetting {
   feeRate: number;
 }
 
+export type FeeCalcMethod = "markup" | "margin";
+
 export interface AlertThresholds {
   budgetOverRate: number;
   budgetPaceLagRate: number;
@@ -22,6 +24,7 @@ export interface AlertThresholds {
 export interface DashboardSettings {
   budgets: BudgetSetting[];
   defaultFeeRate: number;
+  feeCalcMethod: FeeCalcMethod;
   alertThresholds: AlertThresholds;
 }
 
@@ -32,6 +35,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
     { projectName: "Trust株式会社 採用施策", monthlyBudget: 200000, feeRate: 0.2 },
   ],
   defaultFeeRate: 0.2,
+  feeCalcMethod: "markup",
   alertThresholds: {
     budgetOverRate: 90,
     budgetPaceLagRate: 70,
@@ -55,6 +59,7 @@ export function loadSettings(): DashboardSettings {
     return {
       budgets: parsed.budgets ?? DEFAULT_SETTINGS.budgets,
       defaultFeeRate: parsed.defaultFeeRate ?? DEFAULT_SETTINGS.defaultFeeRate,
+      feeCalcMethod: parsed.feeCalcMethod ?? DEFAULT_SETTINGS.feeCalcMethod,
       alertThresholds: { ...DEFAULT_SETTINGS.alertThresholds, ...parsed.alertThresholds },
     };
   } catch {

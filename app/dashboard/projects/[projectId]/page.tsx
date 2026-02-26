@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculateBudgetProgress } from "@/lib/budget";
-import { DEFAULT_SETTINGS, loadSettings } from "@/lib/settings";
+import { DEFAULT_SETTINGS, loadSettings, type FeeCalcMethod } from "@/lib/settings";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
 type AiTab = "overall" | "daily" | "creative";
@@ -110,6 +110,10 @@ function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
+function feeLabel(method: FeeCalcMethod): string {
+  return method === "margin" ? "Fee込(内掛)" : "Fee込(外掛)";
+}
+
 export default function ProjectDetailPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
@@ -187,8 +191,10 @@ export default function ProjectDetailPage() {
       detail.project.spend,
       settings.budgets,
       settings.defaultFeeRate,
+      settings.feeCalcMethod,
     );
   }, [detail, settings]);
+  const feeLabelText = feeLabel(settings.feeCalcMethod);
   const projectCpc = detail && detail.project.clicks > 0 ? detail.project.spend / detail.project.clicks : 0;
   const dailyChartRows = useMemo(() => {
     if (!detail) return [];
@@ -241,7 +247,9 @@ export default function ProjectDetailPage() {
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">消化額</p>
           <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
-          <p className="mt-1 text-xs text-gray-500">Fee込: {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}</p>
+          <p className="mt-1 text-xs text-gray-500">
+            {feeLabelText}: {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}
+          </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-gray-500">CV</p>
@@ -303,7 +311,9 @@ export default function ProjectDetailPage() {
                 />
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-600">
-                <span className="tabular-nums">Fee込: {formatCurrency(budgetProgress.spendWithFee)}</span>
+                <span className="tabular-nums">
+                  {feeLabelText}: {formatCurrency(budgetProgress.spendWithFee)}
+                </span>
                 <span className="tabular-nums">理想: {formatPercent(budgetProgress.idealRate)}</span>
                 <span className="tabular-nums">
                   実績: {formatPercent(budgetProgress.consumptionRate ?? 0)}
@@ -312,7 +322,7 @@ export default function ProjectDetailPage() {
                   着地予想: {budgetProgress.projectedSpend ? formatCurrency(budgetProgress.projectedSpend) : "-"}
                 </span>
                 <span className="tabular-nums">
-                  Fee込着地: {budgetProgress.projectedSpendWithFee ? formatCurrency(budgetProgress.projectedSpendWithFee) : "-"}
+                  {feeLabelText}着地: {budgetProgress.projectedSpendWithFee ? formatCurrency(budgetProgress.projectedSpendWithFee) : "-"}
                 </span>
                 <span className="tabular-nums">
                   残予算: {budgetProgress.remainingBudget !== null ? formatCurrency(budgetProgress.remainingBudget) : "-"}
@@ -545,7 +555,19 @@ export default function ProjectDetailPage() {
               <tbody>
                 {rankedCreatives.map((row, index) => (
                   <tr key={row.ad_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                    <td className="px-3 py-2 font-medium text-navy">{row.creative_name}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-3">
+                        {(row.image_url || row.thumbnail_url) && (
+                          <img
+                            src={row.thumbnail_url || row.image_url || ""}
+                            alt=""
+                            className="h-10 w-10 shrink-0 rounded bg-gray-100 object-cover"
+                            loading="lazy"
+                          />
+                        )}
+                        <span className="font-medium text-navy">{row.creative_name}</span>
+                      </div>
+                    </td>
                     <td className="px-3 py-2">{row.campaign_name}</td>
                     <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
@@ -570,23 +592,61 @@ export default function ProjectDetailPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {rankedCreatives.map((row) => (
-              <article key={row.ad_id} className="rounded-lg border border-gray-200 bg-white p-4">
-                <div className="mb-3 overflow-hidden rounded-md bg-gray-100">
+              <article key={row.ad_id} className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                <div className="flex items-center justify-center bg-gray-50 p-2" style={{ minHeight: "120px" }}>
                   {row.image_url || row.thumbnail_url ? (
                     <img
                       src={row.image_url || row.thumbnail_url || ""}
                       alt={row.creative_name}
-                      className="h-44 w-full object-cover"
+                      className="max-h-64 w-full rounded object-contain"
+                      loading="lazy"
                     />
                   ) : (
-                    <div className="flex h-44 items-center justify-center text-sm text-gray-500">画像なし</div>
+                    <div className="flex h-32 items-center justify-center text-sm text-gray-500">画像なし</div>
                   )}
                 </div>
-                <p className="line-clamp-2 text-sm font-semibold text-navy">{row.creative_name}</p>
-                <div className="mt-2 space-y-1 text-xs text-gray-600">
-                  <p className="tabular-nums">消化額: {formatCurrency(row.spend)}</p>
-                  <p className="tabular-nums">CV: {formatNumber(row.cv)}</p>
-                  <p className="tabular-nums">CPA: {row.cv > 0 ? formatCurrency(row.cpa) : "-"}</p>
+                <div className="p-4">
+                  <p className="line-clamp-2 text-sm font-semibold text-navy">{row.creative_name}</p>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-600">
+                    <div>
+                      <p className="text-gray-400">消化額</p>
+                      <p className="tabular-nums font-medium">{formatCurrency(row.spend)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">CV</p>
+                      <p className="tabular-nums font-medium">{formatNumber(row.cv)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">CPA</p>
+                      <p className="tabular-nums font-medium">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-600">
+                    <div>
+                      <p className="text-gray-400">CTR</p>
+                      <p className="tabular-nums font-medium">{formatPercent(row.ctr)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">CPC</p>
+                      <p className="tabular-nums font-medium">
+                        {row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">IMP</p>
+                      <p className="tabular-nums font-medium">{formatNumber(row.impressions)}</p>
+                    </div>
+                  </div>
+                  {row.ad_id === bestCreativeId && (
+                    <span className="mt-2 inline-block rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+                      Best
+                    </span>
+                  )}
+                  {row.ad_id === worstCreativeId && (
+                    <span className="mt-2 inline-block rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">
+                      Worst
+                    </span>
+                  )}
                 </div>
               </article>
             ))}

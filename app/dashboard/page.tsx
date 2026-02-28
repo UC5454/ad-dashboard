@@ -78,13 +78,25 @@ export default function DashboardPage() {
       const keys = loadApiKeys();
       const clients = loadClients();
       if (keys.length === 0 || clients.length === 0) {
-        if (!mounted) return;
-        setSetupMissing(true);
-        setProjects([]);
-        setDaily([]);
-        setCreatives([]);
-        setLoading(false);
-        return;
+        // localStorage未設定でもサーバー側env変数があればOK
+        try {
+          const envRes = await fetch("/api/meta/check-env");
+          const envData = (await envRes.json()) as { configured: boolean };
+          if (!envData.configured) {
+            if (!mounted) return;
+            setSetupMissing(true);
+            setProjects([]);
+            setDaily([]);
+            setCreatives([]);
+            setLoading(false);
+            return;
+          }
+        } catch {
+          if (!mounted) return;
+          setSetupMissing(true);
+          setLoading(false);
+          return;
+        }
       }
       setSetupMissing(false);
       try {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { DG_ACCOUNT_ID } from "@/lib/constants";
+import { DEFAULT_META_ACCOUNT_ID } from "@/lib/constants";
 import { metaGet } from "@/lib/meta-api";
 import { actionValue, numeric } from "@/lib/meta-utils";
 import type { MetaAdInsights, MetaAdsetInsights, MetaCampaignInsights, MetaCreativeSummary, MetaInsights } from "@/types/meta";
@@ -20,6 +20,16 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const accessToken = request.headers.get("x-meta-token") || process.env.META_ACCESS_TOKEN;
+  const accountId = request.headers.get("x-meta-account-id") || DEFAULT_META_ACCOUNT_ID;
+
+  if (!accessToken) {
+    return NextResponse.json(
+      { error: "Meta APIトークンが未設定です。設定画面でAPIキーを登録してください。" },
+      { status: 400 },
+    );
   }
 
   const campaignId = request.nextUrl.searchParams.get("campaign_id");
@@ -53,27 +63,39 @@ export async function GET(request: NextRequest) {
     }
 
     const [campaignRes, adsetRes, adRes, dailyRes] = (await Promise.all([
-      metaGet(`${DG_ACCOUNT_ID}/insights`, {
-        fields: "campaign_id,campaign_name,impressions,clicks,spend,ctr,cpc,actions,date_start,date_stop",
-        level: "campaign",
-        date_preset: datePreset,
-        filtering,
-      }),
-      metaGet(`${DG_ACCOUNT_ID}/insights`, {
-        fields: "adset_id,adset_name,impressions,clicks,spend,ctr,cpc,reach,frequency,actions,date_start,date_stop",
-        level: "adset",
-        date_preset: datePreset,
-        filtering,
-        limit: "200",
-      }),
-      metaGet(`${DG_ACCOUNT_ID}/insights`, {
-        fields: "ad_id,ad_name,impressions,clicks,spend,ctr,actions",
-        level: "ad",
-        date_preset: datePreset,
-        filtering,
-        limit: "200",
-      }),
-      metaGet(`${DG_ACCOUNT_ID}/insights`, dailyQuery),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "campaign_id,campaign_name,impressions,clicks,spend,ctr,cpc,actions,date_start,date_stop",
+          level: "campaign",
+          date_preset: datePreset,
+          filtering,
+        },
+        accessToken,
+      ),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "adset_id,adset_name,impressions,clicks,spend,ctr,cpc,reach,frequency,actions,date_start,date_stop",
+          level: "adset",
+          date_preset: datePreset,
+          filtering,
+          limit: "200",
+        },
+        accessToken,
+      ),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "ad_id,ad_name,impressions,clicks,spend,ctr,actions",
+          level: "ad",
+          date_preset: datePreset,
+          filtering,
+          limit: "200",
+        },
+        accessToken,
+      ),
+      metaGet(`${accountId}/insights`, dailyQuery, accessToken),
     ])) as [
       { data?: MetaCampaignInsights[] },
       { data?: MetaAdsetInsights[] },
@@ -110,9 +132,13 @@ export async function GET(request: NextRequest) {
     const creativeDetails = await Promise.all(
       ads.map(async (ad) => {
         try {
-          const res = (await metaGet(ad.ad_id, {
-            fields: "name,creative{name,title,body,image_url,thumbnail_url}",
-          })) as AdCreativeResponse;
+          const res = (await metaGet(
+            ad.ad_id,
+            {
+              fields: "name,creative{name,title,body,image_url,thumbnail_url}",
+            },
+            accessToken,
+          )) as AdCreativeResponse;
           return { adId: ad.ad_id, data: res };
         } catch {
           return { adId: ad.ad_id, data: {} as AdCreativeResponse };

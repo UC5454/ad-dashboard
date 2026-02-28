@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { calculateBudgetProgress } from "@/lib/budget";
+import { applyFee, calculateBudgetProgress } from "@/lib/budget";
+import { apiFetch } from "@/lib/api-client";
 import { DEFAULT_SETTINGS, loadSettings, type FeeCalcMethod } from "@/lib/settings";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
@@ -115,8 +116,8 @@ function feeLabel(method: FeeCalcMethod): string {
 }
 
 export default function ProjectDetailPage() {
-  const params = useParams<{ projectId: string }>();
-  const projectId = params.projectId;
+  const params = useParams<Record<string, string>>();
+  const projectId = params.projectId || params.clientId;
 
   const [datePreset, setDatePreset] = useState<DatePreset>("last_30d");
   const [activeAiTab, setActiveAiTab] = useState<AiTab>("overall");
@@ -140,7 +141,7 @@ export default function ProjectDetailPage() {
       setError("");
 
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/meta/project-detail?project_id=${encodeURIComponent(projectId)}&date_preset=${encodeURIComponent(datePreset)}`,
         );
 
@@ -245,10 +246,12 @@ export default function ProjectDetailPage() {
 
       <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-gray-500">消化額</p>
-          <p className="mt-2 text-xl font-bold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
+          <p className="text-sm text-gray-500">{feeLabelText}消化額</p>
+          <p className="mt-2 text-xl font-bold text-navy tabular-nums">
+            {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}
+          </p>
           <p className="mt-1 text-xs text-gray-500">
-            {feeLabelText}: {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}
+            媒体費: {formatCurrency(detail.project.spend)}
           </p>
         </article>
         <article className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -438,6 +441,7 @@ export default function ProjectDetailPage() {
               <tr>
                 <th className="px-3 py-2 text-left font-medium">キャンペーン名</th>
                 <th className="px-3 py-2 text-left font-medium">消化額</th>
+                <th className="px-3 py-2 text-left font-medium">{feeLabelText}</th>
                 <th className="px-3 py-2 text-left font-medium">IMP</th>
                 <th className="px-3 py-2 text-left font-medium">クリック</th>
                 <th className="px-3 py-2 text-left font-medium">CTR</th>
@@ -451,6 +455,9 @@ export default function ProjectDetailPage() {
                 <tr key={row.campaign_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
                   <td className="px-3 py-2 font-medium text-navy">{row.campaign_name}</td>
                   <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {formatCurrency(applyFee(row.spend, budgetProgress?.feeRate ?? settings.defaultFeeRate, settings.feeCalcMethod))}
+                  </td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
@@ -461,7 +468,7 @@ export default function ProjectDetailPage() {
               ))}
               {detail.campaigns.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-3 py-8 text-center text-gray-500">
                     キャンペーンデータがありません
                   </td>
                 </tr>

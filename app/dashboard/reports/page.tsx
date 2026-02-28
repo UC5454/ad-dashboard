@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { applyFee, calculateBudgetProgress } from "@/lib/budget";
+import { apiFetch } from "@/lib/api-client";
 import { DEFAULT_SETTINGS, loadSettings, type FeeCalcMethod } from "@/lib/settings";
 
 type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d" | "this_month";
@@ -125,6 +126,8 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [bootLoading, setBootLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sheetLoading, setSheetLoading] = useState(false);
+  const [sheetResult, setSheetResult] = useState<{ ok: boolean; url?: string; error?: string } | null>(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
   useEffect(() => {
@@ -137,7 +140,7 @@ export default function ReportsPage() {
     const loadProjects = async () => {
       setBootLoading(true);
       try {
-        const res = await fetch("/api/meta/projects?date_preset=last_30d");
+        const res = await apiFetch("/api/meta/projects?date_preset=last_30d");
         if (!res.ok) throw new Error("案件取得に失敗しました");
 
         const rows = (await res.json()) as Array<{ id: string; name: string }>;
@@ -192,7 +195,7 @@ export default function ReportsPage() {
     setError("");
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/meta/project-detail?project_id=${encodeURIComponent(selectedProjectId)}&date_preset=${encodeURIComponent(datePreset)}`,
       );
 
@@ -202,6 +205,13 @@ export default function ReportsPage() {
 
       const data = (await res.json()) as ProjectDetailResponse;
       setDetail(data);
+      void fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: selectedProjectId, period: datePreset }),
+      }).catch(() => {
+        // API未実装環境では履歴保存をスキップ
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "レポート取得エラー");
       setDetail(null);
@@ -298,6 +308,47 @@ export default function ReportsPage() {
     downloadCSV(`project_report_${datePreset}_${selectedProjectId}.csv`, rows);
   };
 
+  const onExportSheet = async () => {
+    if (!detail) return;
+
+    setSheetLoading(true);
+    setSheetResult(null);
+
+    try {
+      const res = await fetch("/api/reports/export-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectName: selectedProjectName,
+          datePreset,
+          project: detail.project,
+          campaigns: detail.campaigns,
+          creatives: detail.creatives,
+          daily: detail.daily,
+          analysis: {
+            overall: detail.analysis.overall,
+            clientReport: detail.analysis.clientReport,
+          },
+          feeRate,
+          feeCalcMethod: settings.feeCalcMethod,
+          monthlyBudget: budgetProgress?.monthlyBudget ?? null,
+        }),
+      });
+
+      const result = (await res.json()) as { ok?: boolean; spreadsheetUrl?: string; error?: string };
+      if (result.ok && result.spreadsheetUrl) {
+        setSheetResult({ ok: true, url: result.spreadsheetUrl });
+        window.open(result.spreadsheetUrl, "_blank", "noopener,noreferrer");
+      } else {
+        setSheetResult({ ok: false, error: result.error || "エクスポートに失敗しました" });
+      }
+    } catch (err) {
+      setSheetResult({ ok: false, error: err instanceof Error ? err.message : "エクスポートに失敗しました" });
+    } finally {
+      setSheetLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -368,11 +419,11 @@ export default function ReportsPage() {
           <>
             <section className="grid grid-cols-1 gap-4 md:grid-cols-5">
               <div className="rounded-lg bg-gray-50 p-4">
-                <p className="text-xs text-gray-500">消化額</p>
-                <p className="mt-1 text-lg font-semibold text-navy tabular-nums">{formatCurrency(detail.project.spend)}</p>
-                <p className="mt-1 text-xs text-gray-500">
-                  {feeLabelText}: {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}
+                <p className="text-xs text-gray-500">{feeLabelText}消化額</p>
+                <p className="mt-1 text-lg font-semibold text-navy tabular-nums">
+                  {formatCurrency(budgetProgress?.spendWithFee ?? detail.project.spend)}
                 </p>
+                <p className="mt-1 text-xs text-gray-500">媒体費: {formatCurrency(detail.project.spend)}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs text-gray-500">CV</p>
@@ -560,6 +611,7 @@ export default function ReportsPage() {
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">キャンペーン</th>
                     <th className="px-3 py-2 text-left font-medium">消化額</th>
+                    <th className="px-3 py-2 text-left font-medium">{feeLabelText}</th>
                     <th className="px-3 py-2 text-left font-medium">IMP</th>
                     <th className="px-3 py-2 text-left font-medium">クリック</th>
                     <th className="px-3 py-2 text-left font-medium">CTR</th>
@@ -573,6 +625,7 @@ export default function ReportsPage() {
                     <tr key={row.campaign_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
                       <td className="px-3 py-2 font-medium text-navy">{row.campaign_name}</td>
                       <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatCurrency(applyFee(row.spend, feeRate, settings.feeCalcMethod))}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
@@ -592,6 +645,7 @@ export default function ReportsPage() {
                     <th className="px-3 py-2 text-left font-medium">クリエイティブ</th>
                     <th className="px-3 py-2 text-left font-medium">キャンペーン</th>
                     <th className="px-3 py-2 text-left font-medium">消化額</th>
+                    <th className="px-3 py-2 text-left font-medium">{feeLabelText}</th>
                     <th className="px-3 py-2 text-left font-medium">IMP</th>
                     <th className="px-3 py-2 text-left font-medium">クリック</th>
                     <th className="px-3 py-2 text-left font-medium">CTR</th>
@@ -606,6 +660,7 @@ export default function ReportsPage() {
                       <td className="px-3 py-2 font-medium text-navy">{row.creative_name}</td>
                       <td className="px-3 py-2">{row.campaign_name}</td>
                       <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatCurrency(applyFee(row.spend, feeRate, settings.feeCalcMethod))}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                       <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
@@ -623,21 +678,49 @@ export default function ReportsPage() {
         )}
       </section>
 
-      <section className="flex flex-wrap gap-3">
+      <section className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={onDownloadPdf}
-          className="rounded-lg bg-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-light"
+          disabled={!detail}
+          className="rounded-lg bg-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-light disabled:cursor-not-allowed disabled:opacity-40"
         >
           PDF ダウンロード
         </button>
         <button
           type="button"
           onClick={onDownloadCsv}
-          className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          disabled={!detail}
+          className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           CSV ダウンロード
         </button>
+        <button
+          type="button"
+          onClick={onExportSheet}
+          disabled={!detail || sheetLoading}
+          className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {sheetLoading ? (
+            <span className="flex items-center gap-2">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              作成中...
+            </span>
+          ) : (
+            "Googleスプレッドシートに出力"
+          )}
+        </button>
+        {sheetResult && (
+          <span className={`text-sm ${sheetResult.ok ? "text-emerald-600" : "text-red-600"}`}>
+            {sheetResult.ok ? (
+              <a href={sheetResult.url} target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
+                スプレッドシートを開く
+              </a>
+            ) : (
+              `エラー: ${sheetResult.error}`
+            )}
+          </span>
+        )}
       </section>
     </div>
   );

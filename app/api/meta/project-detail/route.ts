@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { DG_ACCOUNT_ID } from "@/lib/constants";
+import { DEFAULT_META_ACCOUNT_ID } from "@/lib/constants";
 import { metaGet } from "@/lib/meta-api";
 import { actionValue, numeric } from "@/lib/meta-utils";
 import { extractProjectName, groupCampaignsToProjects } from "@/lib/projects";
@@ -85,6 +85,16 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const accessToken = request.headers.get("x-meta-token") || process.env.META_ACCESS_TOKEN;
+  const accountId = request.headers.get("x-meta-account-id") || DEFAULT_META_ACCOUNT_ID;
+
+  if (!accessToken) {
+    return NextResponse.json(
+      { error: "Meta APIトークンが未設定です。設定画面でAPIキーを登録してください。" },
+      { status: 400 },
+    );
+  }
+
   const projectId = request.nextUrl.searchParams.get("project_id");
   const datePreset = request.nextUrl.searchParams.get("date_preset") || "last_30d";
 
@@ -98,12 +108,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const campaignRes = (await metaGet(`${DG_ACCOUNT_ID}/insights`, {
-      fields: "campaign_id,campaign_name,impressions,clicks,spend,ctr,cpc,actions",
-      level: "campaign",
-      date_preset: datePreset,
-      limit: "500",
-    })) as MetaListResponse<MetaCampaignInsights>;
+    const campaignRes = (await metaGet(
+      `${accountId}/insights`,
+      {
+        fields: "campaign_id,campaign_name,impressions,clicks,spend,ctr,cpc,actions",
+        level: "campaign",
+        date_preset: datePreset,
+        limit: "500",
+      },
+      accessToken,
+    )) as MetaListResponse<MetaCampaignInsights>;
 
     const allCampaigns = campaignRes.data || [];
     const matchedCampaigns = allCampaigns.filter(
@@ -159,35 +173,51 @@ export async function GET(request: NextRequest) {
     ]);
 
     const [projectCampaignRes, adsetRes, adRes, dailyRes] = (await Promise.all([
-      metaGet(`${DG_ACCOUNT_ID}/insights`, {
-        fields: "campaign_id,campaign_name,impressions,clicks,spend,ctr,cpc,actions",
-        level: "campaign",
-        date_preset: datePreset,
-        filtering,
-        limit: "500",
-      }),
-      metaGet(`${DG_ACCOUNT_ID}/insights`, {
-        fields: "campaign_id,campaign_name,adset_id,adset_name,impressions,clicks,spend,ctr,cpc,reach,frequency,actions",
-        level: "adset",
-        date_preset: datePreset,
-        filtering,
-        limit: "500",
-      }),
-      metaGet(`${DG_ACCOUNT_ID}/insights`, {
-        fields: "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,impressions,clicks,spend,ctr,actions",
-        level: "ad",
-        date_preset: datePreset,
-        filtering,
-        limit: "500",
-      }),
-      metaGet(`${DG_ACCOUNT_ID}/insights`, {
-        fields: "campaign_id,campaign_name,impressions,clicks,spend,ctr,cpc,actions,date_start,date_stop",
-        level: "campaign",
-        date_preset: datePreset,
-        filtering,
-        time_increment: "1",
-        limit: "500",
-      }),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "campaign_id,campaign_name,impressions,clicks,spend,ctr,cpc,actions",
+          level: "campaign",
+          date_preset: datePreset,
+          filtering,
+          limit: "500",
+        },
+        accessToken,
+      ),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "campaign_id,campaign_name,adset_id,adset_name,impressions,clicks,spend,ctr,cpc,reach,frequency,actions",
+          level: "adset",
+          date_preset: datePreset,
+          filtering,
+          limit: "500",
+        },
+        accessToken,
+      ),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,impressions,clicks,spend,ctr,actions",
+          level: "ad",
+          date_preset: datePreset,
+          filtering,
+          limit: "500",
+        },
+        accessToken,
+      ),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "campaign_id,campaign_name,impressions,clicks,spend,ctr,cpc,actions,date_start,date_stop",
+          level: "campaign",
+          date_preset: datePreset,
+          filtering,
+          time_increment: "1",
+          limit: "500",
+        },
+        accessToken,
+      ),
     ])) as [
       MetaListResponse<MetaCampaignInsights>,
       MetaListResponse<MetaAdsetInsights>,
@@ -241,9 +271,13 @@ export async function GET(request: NextRequest) {
     const creativeDetails = await Promise.all(
       adRows.map(async (ad) => {
         try {
-          const detail = (await metaGet(ad.ad_id, {
-            fields: "name,creative{name,title,body,image_url,thumbnail_url}",
-          })) as AdCreativeDetail;
+          const detail = (await metaGet(
+            ad.ad_id,
+            {
+              fields: "name,creative{name,title,body,image_url,thumbnail_url}",
+            },
+            accessToken,
+          )) as AdCreativeDetail;
           return { adId: ad.ad_id, detail };
         } catch {
           return { adId: ad.ad_id, detail: {} as AdCreativeDetail };

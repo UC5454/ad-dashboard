@@ -21,11 +21,18 @@ export interface AlertThresholds {
   impDropRate: number;
 }
 
+export interface SlackConfig {
+  webhookUrl: string;
+  enabled: boolean;
+  channelName?: string;
+}
+
 export interface DashboardSettings {
   budgets: BudgetSetting[];
   defaultFeeRate: number;
   feeCalcMethod: FeeCalcMethod;
   alertThresholds: AlertThresholds;
+  slack: SlackConfig;
 }
 
 export const DEFAULT_SETTINGS: DashboardSettings = {
@@ -36,6 +43,11 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   ],
   defaultFeeRate: 0.2,
   feeCalcMethod: "markup",
+  slack: {
+    webhookUrl: "",
+    enabled: false,
+    channelName: "",
+  },
   alertThresholds: {
     budgetOverRate: 90,
     budgetPaceLagRate: 70,
@@ -60,6 +72,7 @@ export function loadSettings(): DashboardSettings {
       budgets: parsed.budgets ?? DEFAULT_SETTINGS.budgets,
       defaultFeeRate: parsed.defaultFeeRate ?? DEFAULT_SETTINGS.defaultFeeRate,
       feeCalcMethod: parsed.feeCalcMethod ?? DEFAULT_SETTINGS.feeCalcMethod,
+      slack: parsed.slack ?? DEFAULT_SETTINGS.slack,
       alertThresholds: { ...DEFAULT_SETTINGS.alertThresholds, ...parsed.alertThresholds },
     };
   } catch {

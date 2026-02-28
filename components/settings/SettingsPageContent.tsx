@@ -69,7 +69,7 @@ export default function SettingsPageContent() {
         <p className="mt-1 text-sm text-gray-500">手数料方式とSlack通知を管理します</p>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
           <Link href="/settings/api-keys" className="rounded-lg border border-gray-200 p-3 text-sm text-navy hover:bg-gray-50">APIキー管理</Link>
-          <Link href="/settings/clients" className="rounded-lg border border-gray-200 p-3 text-sm text-navy hover:bg-gray-50">クライアント管理</Link>
+          <Link href="/settings/clients" className="rounded-lg border border-gray-200 p-3 text-sm text-navy hover:bg-gray-50">案件管理</Link>
           <Link href="/settings/users" className="rounded-lg border border-gray-200 p-3 text-sm text-navy hover:bg-gray-50">ユーザー管理</Link>
         </div>
       </section>

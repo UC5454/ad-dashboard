@@ -1,5 +1,6 @@
 const API_KEYS_KEY = "ad-dashboard-api-keys-data";
 const CLIENTS_KEY = "ad-dashboard-clients-data";
+const COMPANIES_KEY = "ad-dashboard-companies-data";
 
 export interface StoredApiKey {
   id: string;
@@ -19,6 +20,16 @@ export interface StoredClient {
   status: "active" | "paused" | "archived";
   googleApiKeyId?: string;
   metaApiKeyId?: string;
+  createdAt: string;
+}
+
+export interface StoredCompany {
+  id: string;
+  companyName: string;
+  campaignKeywords: string[];
+  monthlyBudget: number;
+  feeRate: number;
+  status: "active" | "paused" | "archived";
   createdAt: string;
 }
 
@@ -96,6 +107,60 @@ export function loadClients(): StoredClient[] {
 export function saveClients(clients: StoredClient[]): void {
   if (!canUseStorage()) return;
   localStorage.setItem(CLIENTS_KEY, JSON.stringify(clients));
+}
+
+export function loadCompanies(): StoredCompany[] {
+  if (!canUseStorage()) return [];
+  try {
+    const raw = localStorage.getItem(COMPANIES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as StoredCompany[];
+      return Array.isArray(parsed) ? parsed : [];
+    }
+
+    // Migrate existing client records into company records when no company data exists yet.
+    const legacyRaw = localStorage.getItem(CLIENTS_KEY);
+    if (!legacyRaw) return [];
+    const legacy = JSON.parse(legacyRaw) as Array<Record<string, unknown>>;
+    if (!Array.isArray(legacy)) return [];
+
+    const migrated = legacy
+      .map((client) => {
+        const name = typeof client.name === "string" ? client.name.trim() : "";
+        const status = client.status;
+        const monthlyBudgetMeta = Number(
+          (client.monthlyBudgetMeta as number | string | undefined) ??
+            (client.monthly_budget_meta as number | string | undefined) ??
+            0,
+        );
+        return {
+          id:
+            typeof client.id === "string" && client.id
+              ? client.id
+              : `company-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          companyName: name || "未設定案件",
+          campaignKeywords: name ? [name] : [],
+          monthlyBudget: Number.isFinite(monthlyBudgetMeta) ? monthlyBudgetMeta : 0,
+          feeRate: 0.2,
+          status: status === "paused" || status === "archived" ? status : "active",
+          createdAt:
+            typeof client.createdAt === "string" && client.createdAt ? client.createdAt : new Date().toISOString(),
+        } satisfies StoredCompany;
+      })
+      .filter((company) => company.companyName.length > 0);
+
+    if (migrated.length > 0) {
+      saveCompanies(migrated);
+    }
+    return migrated;
+  } catch {
+    return [];
+  }
+}
+
+export function saveCompanies(companies: StoredCompany[]): void {
+  if (!canUseStorage()) return;
+  localStorage.setItem(COMPANIES_KEY, JSON.stringify(companies));
 }
 
 export function getMetaToken(clientId: string): string | null {

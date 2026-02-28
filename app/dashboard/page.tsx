@@ -11,7 +11,7 @@ import { calculateBudgetProgress } from "@/lib/budget";
 import { generateAlerts } from "@/lib/alerts";
 import { apiFetch } from "@/lib/api-client";
 import { DEFAULT_SETTINGS, loadSettings, type FeeCalcMethod } from "@/lib/settings";
-import { loadApiKeys, loadClients } from "@/lib/storage";
+import { loadApiKeys, loadCompanies } from "@/lib/storage";
 import type { MetaCreativeSummary, MetaInsights } from "@/types/meta";
 
 type Period = "current_month" | "last_30";
@@ -76,8 +76,8 @@ export default function DashboardPage() {
       setLoading(true);
       setError("");
       const keys = loadApiKeys();
-      const clients = loadClients();
-      if (keys.length === 0 || clients.length === 0) {
+      const companies = loadCompanies();
+      if (companies.length === 0 && keys.length === 0) {
         // localStorage未設定でもサーバー側env変数があればOK
         try {
           const envRes = await fetch("/api/meta/check-env");
@@ -289,7 +289,7 @@ export default function DashboardPage() {
         <section className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 p-6 text-center">
           <h3 className="text-lg font-semibold text-amber-800">初期設定が必要です</h3>
           <p className="mt-2 text-sm text-amber-700">
-            広告データを表示するには、APIキーとクライアントの登録が必要です。
+            広告データを表示するには、APIキーと案件の登録が必要です。
           </p>
           <div className="mt-4 flex justify-center gap-3">
             <Link
@@ -302,7 +302,7 @@ export default function DashboardPage() {
               href="/settings/clients"
               className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-navy hover:bg-gray-50"
             >
-              クライアントを登録
+              案件を登録
             </Link>
           </div>
         </section>

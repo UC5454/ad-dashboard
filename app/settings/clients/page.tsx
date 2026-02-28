@@ -1,107 +1,141 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSession } from "next-auth/react";
-import { loadApiKeys, loadClients, saveClients, type StoredApiKey, type StoredClient } from "@/lib/storage";
-import { isValidMetaAccountId } from "@/lib/validation";
+import { loadCompanies, saveCompanies, type StoredCompany } from "@/lib/storage";
 
-function formatCurrency(value: number): string {
-  return `¥${Math.round(value).toLocaleString("ja-JP")}`;
+interface CompanyForm {
+  companyName: string;
+  campaignKeywordsText: string;
+  monthlyBudget: number;
+  feeRatePercent: number;
+  status: "active" | "paused";
 }
 
 function createId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
-  return `local-${Date.now()}`;
+  return `company-${Date.now()}`;
 }
 
-export default function ClientManagementPage() {
-  const { data: session } = useSession();
-  const role = session?.user?.role;
-  const canEdit = role === "admin" || role === "editor";
+function formatCurrency(value: number): string {
+  return `¥${Math.round(value).toLocaleString("ja-JP")}`;
+}
 
-  const [rows, setRows] = useState<StoredClient[]>([]);
-  const [apiKeys, setApiKeys] = useState<StoredApiKey[]>([]);
-  const [loading, setLoading] = useState(true);
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function statusLabel(status: StoredCompany["status"]): string {
+  if (status === "active") return "稼働中";
+  if (status === "paused") return "停止中";
+  return "アーカイブ";
+}
+
+function statusBadge(status: StoredCompany["status"]): string {
+  if (status === "active") return "bg-emerald-50 text-emerald-700";
+  if (status === "paused") return "bg-amber-50 text-amber-700";
+  return "bg-gray-100 text-gray-600";
+}
+
+const emptyForm: CompanyForm = {
+  companyName: "",
+  campaignKeywordsText: "",
+  monthlyBudget: 0,
+  feeRatePercent: 20,
+  status: "active",
+};
+
+export default function CompanyManagementPage() {
+  const [rows, setRows] = useState<StoredCompany[]>([]);
   const [open, setOpen] = useState(false);
-  const [warning, setWarning] = useState("");
-  const [form, setForm] = useState({
-    name: "",
-    googleAdsAccountId: "",
-    metaAdsAccountId: "",
-    monthlyBudgetGoogle: 0,
-    monthlyBudgetMeta: 0,
-    googleApiKeyId: "",
-    metaApiKeyId: "",
-  });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState<CompanyForm>(emptyForm);
 
   useEffect(() => {
-    if (canEdit) {
-      setRows(loadClients());
-      setApiKeys(loadApiKeys());
-      setLoading(false);
-    }
-  }, [canEdit]);
+    setRows(loadCompanies());
+  }, []);
 
-  const metaKeys = useMemo(() => apiKeys.filter((key) => key.platform === "meta"), [apiKeys]);
-  const googleKeys = useMemo(() => apiKeys.filter((key) => key.platform === "google"), [apiKeys]);
+  const sortedRows = useMemo(
+    () => [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    [rows],
+  );
 
-  if (!canEdit) {
-    return <p className="rounded-xl bg-white p-6 text-sm text-gray-600 shadow-sm">権限がありません</p>;
-  }
+  const openCreate = () => {
+    setEditingId(null);
+    setError("");
+    setForm(emptyForm);
+    setOpen(true);
+  };
+
+  const openEdit = (company: StoredCompany) => {
+    setEditingId(company.id);
+    setError("");
+    setForm({
+      companyName: company.companyName,
+      campaignKeywordsText: company.campaignKeywords.join(", "),
+      monthlyBudget: company.monthlyBudget,
+      feeRatePercent: company.feeRate * 100,
+      status: company.status === "archived" ? "paused" : company.status,
+    });
+    setOpen(true);
+  };
 
   const onSave = () => {
-    if (!form.name.trim()) return;
+    const companyName = form.companyName.trim();
+    const campaignKeywords = form.campaignKeywordsText
+      .split(",")
+      .map((keyword) => keyword.trim())
+      .filter(Boolean);
 
-    if (form.metaAdsAccountId.trim() && !isValidMetaAccountId(form.metaAdsAccountId.trim())) {
-      setWarning("Meta Ads IDは act_1234567890 の形式で入力してください");
+    if (!companyName) {
+      setError("会社名を入力してください");
       return;
     }
 
-    setWarning("");
-    const nextClient: StoredClient = {
-      id: createId(),
-      name: form.name.trim(),
-      googleAdsAccountId: form.googleAdsAccountId.trim(),
-      metaAdsAccountId: form.metaAdsAccountId.trim(),
-      monthlyBudgetGoogle: form.monthlyBudgetGoogle,
-      monthlyBudgetMeta: form.monthlyBudgetMeta,
-      status: "active",
-      googleApiKeyId: form.googleApiKeyId || undefined,
-      metaApiKeyId: form.metaApiKeyId || undefined,
-      createdAt: new Date().toISOString(),
+    const nextCompany: StoredCompany = {
+      id: editingId || createId(),
+      companyName,
+      campaignKeywords,
+      monthlyBudget: Number.isFinite(form.monthlyBudget) ? form.monthlyBudget : 0,
+      feeRate: Math.max(0, form.feeRatePercent) / 100,
+      status: form.status,
+      createdAt: editingId ? rows.find((row) => row.id === editingId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
     };
-    const next = [nextClient, ...rows];
-    setRows(next);
-    saveClients(next);
+
+    const nextRows = editingId
+      ? rows.map((row) => (row.id === editingId ? nextCompany : row))
+      : [nextCompany, ...rows];
+
+    setRows(nextRows);
+    saveCompanies(nextRows);
     setOpen(false);
-    setForm({
-      name: "",
-      googleAdsAccountId: "",
-      metaAdsAccountId: "",
-      monthlyBudgetGoogle: 0,
-      monthlyBudgetMeta: 0,
-      googleApiKeyId: "",
-      metaApiKeyId: "",
-    });
+    setEditingId(null);
+    setForm(emptyForm);
+  };
+
+  const onDelete = (id: string) => {
+    const target = rows.find((row) => row.id === id);
+    if (!target) return;
+    if (!window.confirm(`「${target.companyName}」を削除しますか？`)) return;
+    const nextRows = rows.filter((row) => row.id !== id);
+    setRows(nextRows);
+    saveCompanies(nextRows);
   };
 
   return (
     <div className="space-y-6">
       <section className="rounded-xl bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-navy">クライアント管理</h2>
-            <p className="mt-1 text-sm text-gray-500">クライアント情報と月間予算を管理します</p>
+            <h2 className="text-2xl font-bold text-navy">案件管理</h2>
+            <p className="mt-1 text-sm text-gray-500">広告キャンペーンを会社（案件）単位でグルーピングします</p>
           </div>
           <button
             type="button"
-            onClick={() => {
-              setWarning("");
-              setOpen(true);
-            }}
-            className="rounded-lg bg-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-light"
+            className="rounded-lg bg-blue px-4 py-2 text-sm text-white"
+            onClick={openCreate}
           >
             新規登録
           </button>
@@ -109,133 +143,136 @@ export default function ClientManagementPage() {
       </section>
 
       <section className="overflow-hidden rounded-xl bg-white shadow-sm">
-        {loading ? (
-          <div className="px-4 py-8 text-sm text-gray-500">読み込み中...</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs text-gray-500">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium">クライアント名</th>
-                <th className="px-4 py-3 text-left font-medium">Google Ads ID</th>
-                <th className="px-4 py-3 text-left font-medium">Meta Ads ID</th>
-                <th className="px-4 py-3 text-left font-medium">月予算(Google)</th>
-                <th className="px-4 py-3 text-left font-medium">月予算(Meta)</th>
-                <th className="px-4 py-3 text-left font-medium">ステータス</th>
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-xs text-gray-500">
+            <tr>
+              <th className="px-4 py-3 text-left font-medium">会社名</th>
+              <th className="px-4 py-3 text-left font-medium">マッチキーワード</th>
+              <th className="px-4 py-3 text-left font-medium">月間予算</th>
+              <th className="px-4 py-3 text-left font-medium">手数料率</th>
+              <th className="px-4 py-3 text-left font-medium">ステータス</th>
+              <th className="px-4 py-3 text-left font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRows.map((row) => (
+              <tr key={row.id} className="border-t border-gray-100">
+                <td className="px-4 py-3 text-navy">{row.companyName}</td>
+                <td className="px-4 py-3 text-gray-700">{row.campaignKeywords.join(", ") || "-"}</td>
+                <td className="px-4 py-3 tabular-nums">{formatCurrency(row.monthlyBudget)}</td>
+                <td className="px-4 py-3 tabular-nums">{formatPercent(row.feeRate)}</td>
+                <td className="px-4 py-3">
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${statusBadge(row.status)}`}>{statusLabel(row.status)}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(row)}
+                      className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                    >
+                      編集
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDelete(row.id)}
+                      className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                    >
+                      削除
+                    </button>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id} className="border-t border-gray-100">
-                  <td className="px-4 py-3">{row.name}</td>
-                  <td className="px-4 py-3">{row.googleAdsAccountId || "-"}</td>
-                  <td className="px-4 py-3">{row.metaAdsAccountId || "-"}</td>
-                  <td className="px-4 py-3 tabular-nums">{formatCurrency(row.monthlyBudgetGoogle)}</td>
-                  <td className="px-4 py-3 tabular-nums">{formatCurrency(row.monthlyBudgetMeta)}</td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-                      {row.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                    クライアントが未登録です
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
+            ))}
+            {sortedRows.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                  案件が未登録です
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </section>
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-xl rounded-xl bg-white p-5 shadow-lg">
-            <h3 className="text-lg font-semibold text-navy">クライアント新規登録</h3>
-            {warning && (
-              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{warning}</p>
-            )}
-            <div className="mt-4 grid grid-cols-1 gap-3">
-              <input
-                value={form.name}
-                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                placeholder="クライアント名"
-                className="rounded-lg border border-gray-200 px-3 py-2"
-              />
-              <input
-                value={form.googleAdsAccountId}
-                onChange={(event) => setForm((prev) => ({ ...prev, googleAdsAccountId: event.target.value }))}
-                placeholder="Google Ads ID"
-                className="rounded-lg border border-gray-200 px-3 py-2"
-              />
-              <input
-                value={form.metaAdsAccountId}
-                onChange={(event) => {
-                  setWarning("");
-                  setForm((prev) => ({ ...prev, metaAdsAccountId: event.target.value }));
-                }}
-                placeholder="Meta Ads ID"
-                className="rounded-lg border border-gray-200 px-3 py-2"
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  type="number"
-                  value={form.monthlyBudgetGoogle}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      monthlyBudgetGoogle: Number.parseFloat(event.target.value) || 0,
-                    }))
-                  }
-                  placeholder="月予算(Google)"
-                  className="rounded-lg border border-gray-200 px-3 py-2"
-                />
-                <input
-                  type="number"
-                  value={form.monthlyBudgetMeta}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      monthlyBudgetMeta: Number.parseFloat(event.target.value) || 0,
-                    }))
-                  }
-                  placeholder="月予算(Meta)"
-                  className="rounded-lg border border-gray-200 px-3 py-2"
-                />
-              </div>
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-lg">
+            <h3 className="text-lg font-semibold text-navy">{editingId ? "案件を編集" : "案件を新規登録"}</h3>
+            {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+            <div className="mt-4 grid grid-cols-1 gap-4">
               <label className="text-sm text-gray-700">
-                Google APIキー
-                <select
-                  value={form.googleApiKeyId}
-                  onChange={(event) => setForm((prev) => ({ ...prev, googleApiKeyId: event.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
-                >
-                  <option value="">未選択</option>
-                  {googleKeys.map((key) => (
-                    <option key={key.id} value={key.id}>
-                      {key.keyName}
-                    </option>
-                  ))}
-                </select>
+                会社名
+                <input
+                  value={form.companyName}
+                  onChange={(event) => setForm((prev) => ({ ...prev, companyName: event.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2"
+                  placeholder="会社名を入力"
+                />
               </label>
+
               <label className="text-sm text-gray-700">
-                Meta APIキー
+                マッチキーワード
+                <input
+                  value={form.campaignKeywordsText}
+                  onChange={(event) => setForm((prev) => ({ ...prev, campaignKeywordsText: event.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2"
+                  placeholder="例: CREET, 美容外科"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  キャンペーン名に含まれるキーワードをカンマ区切りで入力。いずれかが含まれるキャンペーンがこの案件にグルーピングされます
+                </p>
+              </label>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="text-sm text-gray-700">
+                  月間予算（円）
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.monthlyBudget}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        monthlyBudget: Number.parseFloat(event.target.value) || 0,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2"
+                  />
+                </label>
+
+                <label className="text-sm text-gray-700">
+                  手数料率（%）
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={form.feeRatePercent}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        feeRatePercent: Number.parseFloat(event.target.value) || 0,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2"
+                  />
+                </label>
+              </div>
+
+              <label className="text-sm text-gray-700">
+                ステータス
                 <select
-                  value={form.metaApiKeyId}
-                  onChange={(event) => setForm((prev) => ({ ...prev, metaApiKeyId: event.target.value }))}
+                  value={form.status}
+                  onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value as "active" | "paused" }))}
                   className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2"
                 >
-                  <option value="">未選択</option>
-                  {metaKeys.map((key) => (
-                    <option key={key.id} value={key.id}>
-                      {key.keyName}
-                    </option>
-                  ))}
+                  <option value="active">active</option>
+                  <option value="paused">paused</option>
                 </select>
               </label>
             </div>
+
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -244,11 +281,7 @@ export default function ClientManagementPage() {
               >
                 キャンセル
               </button>
-              <button
-                type="button"
-                onClick={onSave}
-                className="rounded-lg bg-blue px-4 py-2 text-sm font-medium text-white hover:bg-blue-light"
-              >
+              <button type="button" onClick={onSave} className="rounded-lg bg-blue px-4 py-2 text-sm text-white">
                 保存
               </button>
             </div>

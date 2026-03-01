@@ -20,7 +20,6 @@ interface NavItem {
 
 const menuItems: NavItem[] = [
   { href: "/dashboard", label: "ダッシュボード", iconPath: "M4 12h6V4H4v8Zm10 8h6v-6h-6v6Zm0-10h6V4h-6v6ZM4 20h6v-6H4v6Z" },
-  { href: "/dashboard/compare", label: "案件クロス分析", iconPath: "M4 19V9m8 10V5m8 14v-7" },
   { href: "/dashboard/alerts", label: "アラート", iconPath: "M12 8v4m0 4h.01M5.2 18h13.6L12 4 5.2 18Z" },
   { href: "/dashboard/reports", label: "レポート", iconPath: "M8 4h8l4 4v12H8V4Zm8 0v4h4M10 12h8M10 16h8" },
 ];

@@ -487,6 +487,7 @@ export default function ProjectDetailPage() {
                 <th className="px-3 py-2 text-left font-medium">広告セット名</th>
                 <th className="px-3 py-2 text-left font-medium">キャンペーン名</th>
                 <th className="px-3 py-2 text-left font-medium">消化額</th>
+                <th className="px-3 py-2 text-left font-medium">{feeLabelText}</th>
                 <th className="px-3 py-2 text-left font-medium">IMP</th>
                 <th className="px-3 py-2 text-left font-medium">クリック</th>
                 <th className="px-3 py-2 text-left font-medium">CTR</th>
@@ -501,6 +502,9 @@ export default function ProjectDetailPage() {
                   <td className="px-3 py-2 font-medium text-navy">{row.adset_name}</td>
                   <td className="px-3 py-2">{row.campaign_name}</td>
                   <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {formatCurrency(applyFee(row.spend, budgetProgress?.feeRate ?? settings.defaultFeeRate, settings.feeCalcMethod))}
+                  </td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                   <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
@@ -511,7 +515,7 @@ export default function ProjectDetailPage() {
               ))}
               {detail.adsets.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-gray-500">
+                  <td colSpan={10} className="px-3 py-8 text-center text-gray-500">
                     広告セットデータがありません
                   </td>
                 </tr>
@@ -544,12 +548,13 @@ export default function ProjectDetailPage() {
 
         {creativeView === "table" ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1040px] text-sm">
+            <table className="w-full min-w-[1140px] text-sm">
               <thead className="bg-gray-50 text-xs text-gray-500">
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">クリエイティブ名</th>
                   <th className="px-3 py-2 text-left font-medium">キャンペーン名</th>
                   <th className="px-3 py-2 text-left font-medium">消化額</th>
+                  <th className="px-3 py-2 text-left font-medium">{feeLabelText}</th>
                   <th className="px-3 py-2 text-left font-medium">IMP</th>
                   <th className="px-3 py-2 text-left font-medium">クリック</th>
                   <th className="px-3 py-2 text-left font-medium">CTR</th>
@@ -577,6 +582,9 @@ export default function ProjectDetailPage() {
                     </td>
                     <td className="px-3 py-2">{row.campaign_name}</td>
                     <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {formatCurrency(applyFee(row.spend, budgetProgress?.feeRate ?? settings.defaultFeeRate, settings.feeCalcMethod))}
+                    </td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.impressions)}</td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.clicks)}</td>
                     <td className="px-3 py-2 tabular-nums">{formatPercent(row.ctr)}</td>
@@ -630,6 +638,12 @@ export default function ProjectDetailPage() {
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-600">
                     <div>
+                      <p className="text-gray-400">{feeLabelText}</p>
+                      <p className="tabular-nums font-medium">
+                        {formatCurrency(applyFee(row.spend, budgetProgress?.feeRate ?? settings.defaultFeeRate, settings.feeCalcMethod))}
+                      </p>
+                    </div>
+                    <div>
                       <p className="text-gray-400">CTR</p>
                       <p className="tabular-nums font-medium">{formatPercent(row.ctr)}</p>
                     </div>
@@ -639,6 +653,8 @@ export default function ProjectDetailPage() {
                         {row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}
                       </p>
                     </div>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-600">
                     <div>
                       <p className="text-gray-400">IMP</p>
                       <p className="tabular-nums font-medium">{formatNumber(row.impressions)}</p>

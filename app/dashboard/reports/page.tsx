@@ -36,6 +36,7 @@ interface CampaignRow {
   cpc?: number;
   cv: number;
   cpa: number;
+  purchase_roas?: number | null;
 }
 
 interface CreativeRow {
@@ -50,6 +51,7 @@ interface CreativeRow {
   cpc?: number;
   cv: number;
   cpa: number;
+  purchase_roas?: number | null;
   image_url?: string | null;
   thumbnail_url?: string | null;
 }
@@ -76,6 +78,7 @@ interface ProjectDetailResponse {
     cpc?: number;
     cv: number;
     cpa: number;
+    purchase_roas?: number | null;
   };
   campaigns: CampaignRow[];
   creatives: CreativeRow[];
@@ -106,7 +109,7 @@ function feeLabel(method: FeeCalcMethod): string {
 
 function downloadCSV(filename: string, rows: string[][]) {
   const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -245,10 +248,22 @@ export default function ReportsPage() {
     const canvas = await html2canvasFn(preview, { scale: 2 });
     const imageData = canvas.toDataURL("image/png");
     const pdf = new jsPDFCtor("p", "mm", "a4");
-    const width = pdf.internal.pageSize.getWidth();
-    const height = (canvas.height * width) / canvas.width;
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgHeight = (canvas.height * pageWidth) / canvas.width;
 
-    pdf.addImage(imageData, "PNG", 0, 0, width, height);
+    let heightLeft = imgHeight;
+    let position = 0;
+
+    pdf.addImage(imageData, "PNG", 0, position, pageWidth, imgHeight);
+    heightLeft -= pageHeight;
+
+    while (heightLeft > 0) {
+      position -= pageHeight;
+      pdf.addPage();
+      pdf.addImage(imageData, "PNG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+    }
     pdf.save(`project_report_${datePreset}_${selectedProjectId}.pdf`);
   };
 
@@ -273,7 +288,7 @@ export default function ReportsPage() {
     });
 
     rows.push([]);
-    rows.push(["キャンペーン", "消化額", "Fee込消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]);
+    rows.push(["キャンペーン", "消化額", "Fee込消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA", "CVR"]);
     detail.campaigns.forEach((row) => {
       const cpc = row.clicks > 0 ? row.spend / row.clicks : 0;
       const spendWithFee = applyFee(row.spend, feeRate, settings.feeCalcMethod);
@@ -287,11 +302,12 @@ export default function ReportsPage() {
         String(Math.round(cpc)),
         String(Math.round(row.cv)),
         String(Math.round(row.cpa)),
+        row.clicks > 0 ? ((row.cv / row.clicks) * 100).toFixed(2) : "0",
       ]);
     });
 
     rows.push([]);
-    rows.push(["クリエイティブ", "キャンペーン", "消化額", "Fee込消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA"]);
+    rows.push(["クリエイティブ", "キャンペーン", "消化額", "Fee込消化額", "IMP", "クリック", "CTR", "CPC", "CV", "CPA", "CVR"]);
     detail.creatives.forEach((row) => {
       const cpc = row.clicks > 0 ? row.spend / row.clicks : 0;
       const spendWithFee = applyFee(row.spend, feeRate, settings.feeCalcMethod);
@@ -306,6 +322,7 @@ export default function ReportsPage() {
         String(Math.round(cpc)),
         String(Math.round(row.cv)),
         String(Math.round(row.cpa)),
+        row.clicks > 0 ? ((row.cv / row.clicks) * 100).toFixed(2) : "0",
       ]);
     });
 
@@ -319,7 +336,7 @@ export default function ReportsPage() {
     setSheetResult(null);
 
     try {
-      const res = await fetch("/api/reports/export-sheet", {
+      const res = await apiFetch("/api/reports/export-sheet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -360,7 +377,7 @@ export default function ReportsPage() {
     setSlidesResult(null);
 
     try {
-      const res = await fetch("/api/reports/export-slides", {
+      const res = await apiFetch("/api/reports/export-slides", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -462,7 +479,7 @@ export default function ReportsPage() {
 
         {detail ? (
           <>
-            <section className="grid grid-cols-1 gap-4 md:grid-cols-5">
+            <section className="grid grid-cols-1 gap-4 md:grid-cols-6">
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs text-gray-500">{feeLabelText}消化額</p>
                 <p className="mt-1 text-lg font-semibold text-navy tabular-nums">
@@ -488,6 +505,14 @@ export default function ReportsPage() {
                 <p className="text-xs text-gray-500">CPC</p>
                 <p className="mt-1 text-lg font-semibold text-navy tabular-nums">
                   {detail.project.clicks > 0 ? formatCurrency(detail.project.spend / detail.project.clicks) : "-"}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-50 p-4">
+                <p className="text-xs text-gray-500">ROAS</p>
+                <p className="mt-1 text-lg font-semibold text-navy tabular-nums">
+                  {typeof detail.project.purchase_roas === "number" && Number.isFinite(detail.project.purchase_roas)
+                    ? `${detail.project.purchase_roas.toFixed(2)}x`
+                    : "-"}
                 </p>
               </div>
             </section>
@@ -628,6 +653,7 @@ export default function ReportsPage() {
                     <th className="px-3 py-2 text-left font-medium">CPC</th>
                     <th className="px-3 py-2 text-left font-medium">CV</th>
                     <th className="px-3 py-2 text-left font-medium">CPA</th>
+                    <th className="px-3 py-2 text-left font-medium">CVR</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -644,6 +670,7 @@ export default function ReportsPage() {
                       <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                       <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? ((row.cv / row.clicks) * 100).toFixed(2) + "%" : "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -663,6 +690,7 @@ export default function ReportsPage() {
                     <th className="px-3 py-2 text-left font-medium">CPC</th>
                     <th className="px-3 py-2 text-left font-medium">CV</th>
                     <th className="px-3 py-2 text-left font-medium">CPA</th>
+                    <th className="px-3 py-2 text-left font-medium">CVR</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -677,6 +705,7 @@ export default function ReportsPage() {
                       <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? formatCurrency(row.spend / row.clicks) : "-"}</td>
                       <td className="px-3 py-2 tabular-nums">{formatNumber(row.cv)}</td>
                       <td className="px-3 py-2 tabular-nums">{row.cv > 0 ? formatCurrency(row.cpa) : "-"}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.clicks > 0 ? ((row.cv / row.clicks) * 100).toFixed(2) + "%" : "-"}</td>
                     </tr>
                   ))}
                 </tbody>

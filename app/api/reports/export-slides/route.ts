@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { applyFee } from "@/lib/budget";
 import type { Session } from "next-auth";
 
 interface ProjectMetrics {
@@ -9,6 +10,7 @@ interface ProjectMetrics {
   ctr: number;
   cv: number;
   cpa: number;
+  purchase_roas?: number | null;
 }
 
 interface CampaignRow {
@@ -19,6 +21,7 @@ interface CampaignRow {
   ctr: number;
   cv: number;
   cpa: number;
+  purchase_roas?: number | null;
 }
 
 interface CreativeRow {
@@ -114,13 +117,6 @@ const JA_DATE = new Intl.DateTimeFormat("ja-JP", {
   day: "2-digit",
   timeZone: "Asia/Tokyo",
 });
-
-function applyFee(amount: number, feeRate: number, method: "markup" | "margin"): number {
-  if (method === "margin") {
-    return feeRate < 1 ? amount / (1 - feeRate) : amount;
-  }
-  return amount * (1 + feeRate);
-}
 
 function roundInt(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -526,11 +522,16 @@ function buildBatchRequests(
     { label: "CTR", value: formatPercent(data.project.ctr) },
     { label: "CPC", value: formatCurrency(cpc) },
   ];
+  if (typeof data.project.purchase_roas === "number" && Number.isFinite(data.project.purchase_roas)) {
+    kpiMetrics.push({ label: "ROAS", value: `${data.project.purchase_roas.toFixed(2)}x` });
+  }
 
-  const boxWidth = 1700000;
+  const boxWidth = kpiMetrics.length > 5 ? 1400000 : 1700000;
   const boxHeight = 1450000;
   const gap = 120000;
-  const startX = 539200;
+  const totalWidth = boxWidth * kpiMetrics.length + gap * (kpiMetrics.length - 1);
+  const maxSlideWidth = 10000000;
+  const startX = Math.max(250000, Math.floor((maxSlideWidth - totalWidth) / 2));
   const boxY = 1650000;
 
   kpiMetrics.forEach((metric, index) => {
@@ -785,7 +786,8 @@ async function slidesApiFetch<T>(url: string, accessToken: string, body: unknown
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Slides API error (${response.status}): ${text}`);
+    console.error(`Slides API error (${response.status}):`, text);
+    throw new Error(`スライドの作成中にエラーが発生しました（${response.status}）`);
   }
   return (await response.json()) as T;
 }
@@ -799,7 +801,8 @@ async function slidesGetFetch<T>(url: string, accessToken: string): Promise<T> {
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Slides API error (${response.status}): ${text}`);
+    console.error(`Slides API GET error (${response.status}):`, text);
+    throw new Error(`スライドデータの取得中にエラーが発生しました（${response.status}）`);
   }
   return (await response.json()) as T;
 }

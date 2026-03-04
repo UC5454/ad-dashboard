@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { applyFee } from "@/lib/budget";
 import type { Session } from "next-auth";
 
 interface ProjectMetrics {
@@ -9,6 +10,7 @@ interface ProjectMetrics {
   ctr: number;
   cv: number;
   cpa: number;
+  purchase_roas?: number | null;
 }
 
 interface CampaignRow {
@@ -19,6 +21,7 @@ interface CampaignRow {
   ctr: number;
   cv: number;
   cpa: number;
+  purchase_roas?: number | null;
 }
 
 interface AdsetRow {
@@ -140,13 +143,6 @@ const JA_DATE = new Intl.DateTimeFormat("ja-JP", {
   day: "numeric",
   timeZone: "Asia/Tokyo",
 });
-
-function applyFee(amount: number, feeRate: number, method: "markup" | "margin"): number {
-  if (method === "margin") {
-    return feeRate < 1 ? amount / (1 - feeRate) : amount;
-  }
-  return amount * (1 + feeRate);
-}
 
 function roundInt(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -334,6 +330,7 @@ function toCampaignTableRows(campaigns: CampaignRow[], feeRate: number, feeMetho
       "獲得件数",
       "獲得率",
       "獲得単価",
+      "ROAS",
       "ランク",
     ],
     [
@@ -348,6 +345,7 @@ function toCampaignTableRows(campaigns: CampaignRow[], feeRate: number, feeMetho
       roundInt(totalCv),
       toPercent(calcRate(totalCv, totalClicks) * 100),
       roundInt(calcCpa(totalSpend, totalCv)),
+      "-",
       "-",
     ],
   ];
@@ -365,6 +363,7 @@ function toCampaignTableRows(campaigns: CampaignRow[], feeRate: number, feeMetho
       roundInt(row.cv),
       toPercent(calcRate(row.cv, row.clicks) * 100),
       roundInt(calcCpa(row.spend, row.cv)),
+      typeof row.purchase_roas === "number" && Number.isFinite(row.purchase_roas) ? row.purchase_roas : "-",
       ranks[index],
     ]);
   });
@@ -838,7 +837,8 @@ async function googleApiFetch<T>(url: string, accessToken: string, body: unknown
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Google API error (${response.status}): ${text}`);
+    console.error(`Sheets API error (${response.status}):`, text);
+    throw new Error(`シートの作成中にエラーが発生しました（${response.status}）`);
   }
 
   if (response.status === 204) {
@@ -939,6 +939,13 @@ export async function POST(request: NextRequest) {
       ["2. 広告結果サマリー"],
       ["獲得件数", roundInt(data.project.cv), calcMonthOnMonth(data.project.cv, data.previous?.cv)],
       ["獲得単価", roundInt(data.project.cpa), calcMonthOnMonth(data.project.cpa, data.previous?.cpa)],
+      [
+        "ROAS",
+        typeof data.project.purchase_roas === "number" && Number.isFinite(data.project.purchase_roas)
+          ? `${data.project.purchase_roas.toFixed(2)}x`
+          : "-",
+        "-",
+      ],
       ["ご利用額", roundInt(data.project.spend), calcMonthOnMonth(data.project.spend, data.previous?.spend)],
       [],
       ["3. 総評"],
@@ -1074,13 +1081,16 @@ export async function POST(request: NextRequest) {
 
     const summarySheetId = sheetIdByName.get("サマリー");
     if (summarySheetId !== undefined) {
-      [2, 7, 12].forEach((rowIndex) => {
+      const summaryStartRowIndex = 2;
+      const summaryEndRowIndex = summaryStartRowIndex + summaryRows.length;
+      [2, 7, 13].forEach((rowIndex) => {
         formatRequests.push(headerRequest(summarySheetId, rowIndex, 6));
       });
-      formatRequests.push(borderRequest(summarySheetId, 2, 18, 0, 6));
+      formatRequests.push(borderRequest(summarySheetId, summaryStartRowIndex, summaryEndRowIndex, 0, 6));
       formatRequests.push(numberFormatRequest(summarySheetId, 3, 6, 1, 2, "¥#,##0"));
       formatRequests.push(numberFormatRequest(summarySheetId, 3, 6, 2, 3, "0.0%"));
-      formatRequests.push(numberFormatRequest(summarySheetId, 8, 11, 1, 2, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(summarySheetId, 8, 10, 1, 2, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(summarySheetId, 11, 12, 1, 2, "¥#,##0"));
       formatRequests.push({
         autoResizeDimensions: {
           dimensions: { sheetId: summarySheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 10 },
@@ -1144,9 +1154,10 @@ export async function POST(request: NextRequest) {
       formatRequests.push(numberFormatRequest(campaignSheetId, 1, campaignRows.length, 8, 9, "#,##0"));
       formatRequests.push(numberFormatRequest(campaignSheetId, 1, campaignRows.length, 9, 10, "0.00%"));
       formatRequests.push(numberFormatRequest(campaignSheetId, 1, campaignRows.length, 10, 11, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(campaignSheetId, 1, campaignRows.length, 11, 12, "0.00"));
 
       for (let i = 2; i < campaignRows.length; i += 1) {
-        const rank = String(campaignRows[i][11]);
+        const rank = String(campaignRows[i][12]);
         if (rank in RANK_COLORS) {
           formatRequests.push({
             repeatCell: {
@@ -1154,8 +1165,8 @@ export async function POST(request: NextRequest) {
                 sheetId: campaignSheetId,
                 startRowIndex: i,
                 endRowIndex: i + 1,
-                startColumnIndex: 11,
-                endColumnIndex: 12,
+                startColumnIndex: 12,
+                endColumnIndex: 13,
               },
               cell: { userEnteredFormat: { backgroundColor: RANK_COLORS[rank as "A" | "B" | "C" | "D"] } },
               fields: "userEnteredFormat.backgroundColor",

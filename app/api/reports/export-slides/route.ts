@@ -31,6 +31,8 @@ interface CreativeRow {
   ctr: number;
   cv: number;
   cpa: number;
+  image_url?: string | null;
+  thumbnail_url?: string | null;
 }
 
 interface DailyRow {
@@ -415,7 +417,12 @@ function createTableRequests(params: {
   return requests;
 }
 
-function buildBatchRequests(data: ReportData, coverSlideId: string): SlidesBatchRequest[] {
+function buildBatchRequests(
+  data: ReportData,
+  coverSlideId: string,
+  options: { includeCreativeImages?: boolean } = {},
+): SlidesBatchRequest[] {
+  const includeCreativeImages = options.includeCreativeImages ?? true;
   const periodText = formatPeriod(data.datePreset, data.daily);
   const submitDateText = JA_DATE.format(new Date());
   const cpc = calcCpc(data.project.spend, data.project.clicks);
@@ -569,14 +576,6 @@ function buildBatchRequests(data: ReportData, coverSlideId: string): SlidesBatch
     }),
   );
 
-  const creativeRows = topBySpend(data.creatives, 10).map((row, index) => [
-    row.creative_name,
-    formatCurrency(applyFee(row.spend, data.feeRate, data.feeCalcMethod)),
-    `${roundInt(row.cv).toLocaleString("ja-JP")}`,
-    row.cv > 0 ? formatCurrency(row.cpa) : "-",
-    `${index + 1}`,
-  ]);
-
   requests.push(
     ...createTextBoxRequests({
       slideId: slideCreative,
@@ -588,15 +587,78 @@ function buildBatchRequests(data: ReportData, coverSlideId: string): SlidesBatch
       bold: true,
       color: NAVY,
     }),
-    ...createTableRequests({
-      slideId: slideCreative,
-      tableId: "creative_table",
-      headers: ["クリエイティブ名", "消化額(Fee込)", "CV", "CPA", "ランク"],
-      rows: creativeRows,
-      position: { x: 450000, y: 1200000 },
-      size: { width: 9150000, height: 3900000 },
-    }),
   );
+
+  const sortedCreatives = topBySpend(data.creatives, 10);
+  const creativesWithImages = sortedCreatives
+    .map((creative, index) => ({ creative, rank: index + 1 }))
+    .filter(({ creative }) => Boolean(creative.thumbnail_url || creative.image_url));
+
+  if (includeCreativeImages && creativesWithImages.length > 0) {
+    creativesWithImages.slice(0, 5).forEach(({ creative, rank }, index) => {
+      const imageUrl = creative.thumbnail_url || creative.image_url;
+      if (!imageUrl) return;
+
+      requests.push({
+        createImage: {
+          objectId: `cr_img_${index}`,
+          url: imageUrl,
+          elementProperties: {
+            pageObjectId: slideCreative,
+            size: {
+              width: { magnitude: 1200000, unit: "EMU" },
+              height: { magnitude: 1200000, unit: "EMU" },
+            },
+            transform: {
+              scaleX: 1,
+              scaleY: 1,
+              translateX: 572000,
+              translateY: 900000 + index * 750000,
+              unit: "EMU",
+            },
+          },
+        },
+      });
+
+      const infoText = [
+        `ランク: ${rank}`,
+        creative.creative_name,
+        `消化額(Fee込): ${formatCurrency(applyFee(creative.spend, data.feeRate, data.feeCalcMethod))}`,
+        `CV: ${roundInt(creative.cv).toLocaleString("ja-JP")} / CPA: ${creative.cv > 0 ? formatCurrency(creative.cpa) : "-"}`,
+      ].join("\n");
+
+      requests.push(
+        ...createTextBoxRequests({
+          slideId: slideCreative,
+          objectId: `creative_info_${index}`,
+          text: infoText,
+          position: { x: 1950000, y: 920000 + index * 750000 },
+          size: { width: 7700000, height: 620000 },
+          fontSizePt: 11,
+          color: NAVY,
+        }),
+      );
+    });
+  } else {
+    const creativeRows = sortedCreatives.map((row, index) => [
+      row.creative_name,
+      formatCurrency(applyFee(row.spend, data.feeRate, data.feeCalcMethod)),
+      `${roundInt(row.cv).toLocaleString("ja-JP")}`,
+      row.cv > 0 ? formatCurrency(row.cpa) : "-",
+      `${index + 1}`,
+    ]);
+
+    requests.push(
+      ...createTableRequests({
+        slideId: slideCreative,
+        tableId: "creative_table",
+        headers: ["クリエイティブ名", "消化額(Fee込)", "CV", "CPA", "ランク"],
+        rows: creativeRows,
+        position: { x: 450000, y: 1200000 },
+        size: { width: 9150000, height: 3900000 },
+      }),
+    );
+  }
 
   const recentDailyRows = [...data.daily]
     .sort((a, b) => a.date_start.localeCompare(b.date_start))
@@ -793,11 +855,18 @@ export async function POST(req: NextRequest) {
       throw new Error("表紙スライドIDの取得に失敗しました");
     }
 
-    const requests = buildBatchRequests(data, coverSlideId);
+    const requests = buildBatchRequests(data, coverSlideId, { includeCreativeImages: true });
 
-    await slidesApiFetch<{ replies?: unknown[] }>(`${SLIDES_API}/${presentationId}:batchUpdate`, accessToken, {
-      requests,
-    });
+    try {
+      await slidesApiFetch<{ replies?: unknown[] }>(`${SLIDES_API}/${presentationId}:batchUpdate`, accessToken, {
+        requests,
+      });
+    } catch {
+      const fallbackRequests = buildBatchRequests(data, coverSlideId, { includeCreativeImages: false });
+      await slidesApiFetch<{ replies?: unknown[] }>(`${SLIDES_API}/${presentationId}:batchUpdate`, accessToken, {
+        requests: fallbackRequests,
+      });
+    }
 
     return NextResponse.json({
       ok: true,

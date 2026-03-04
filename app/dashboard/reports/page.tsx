@@ -50,6 +50,8 @@ interface CreativeRow {
   cpc?: number;
   cv: number;
   cpa: number;
+  image_url?: string | null;
+  thumbnail_url?: string | null;
 }
 
 interface DailyRow {
@@ -685,6 +687,7 @@ export default function ReportsPage() {
               <table className="w-full min-w-[980px] text-sm">
                 <thead className="bg-gray-50 text-xs text-gray-500">
                   <tr>
+                    <th className="px-3 py-2 text-left font-medium">画像</th>
                     <th className="px-3 py-2 text-left font-medium">クリエイティブ</th>
                     <th className="px-3 py-2 text-left font-medium">キャンペーン</th>
                     <th className="px-3 py-2 text-left font-medium">消化額</th>
@@ -700,6 +703,18 @@ export default function ReportsPage() {
                 <tbody>
                   {detail.creatives.map((row, index) => (
                     <tr key={row.ad_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                      <td className="px-3 py-2">
+                        {row.thumbnail_url || row.image_url ? (
+                          <img
+                            src={row.thumbnail_url || row.image_url || ""}
+                            alt={row.creative_name}
+                            className="h-10 w-10 rounded object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 font-medium text-navy">{row.creative_name}</td>
                       <td className="px-3 py-2">{row.campaign_name}</td>
                       <td className="px-3 py-2 tabular-nums">{formatCurrency(row.spend)}</td>

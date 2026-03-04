@@ -42,6 +42,8 @@ interface CreativeRow {
   ctr: number;
   cv: number;
   cpa: number;
+  image_url?: string | null;
+  thumbnail_url?: string | null;
 }
 
 interface DailyRow {
@@ -469,6 +471,7 @@ function toCreativeTableRows(creatives: CreativeRow[], feeRate: number, feeMetho
   const rows: TableRows = [
     [
       "No.",
+      "画像",
       "キャンペーン",
       "広告セット",
       "クリエイティブ名",
@@ -485,6 +488,7 @@ function toCreativeTableRows(creatives: CreativeRow[], feeRate: number, feeMetho
     ],
     [
       "合計",
+      "",
       "-",
       "-",
       "-",
@@ -502,8 +506,11 @@ function toCreativeTableRows(creatives: CreativeRow[], feeRate: number, feeMetho
   ];
 
   creatives.forEach((row, index) => {
+    const imageUrl = row.thumbnail_url || row.image_url;
+    const imageFormula = imageUrl ? `=IMAGE("${imageUrl.replaceAll('"', '""')}")` : "";
     rows.push([
       index + 1,
+      imageFormula,
       row.campaign_name,
       row.adset_name?.trim() || "未分類",
       row.creative_name,
@@ -1189,15 +1196,15 @@ export async function POST(request: NextRequest) {
 
     const creativeSheetId = sheetIdByName.get("クリエイティブ別");
     if (creativeSheetId !== undefined) {
-      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 4, 6, "#,##0"));
-      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 6, 7, "0.00%"));
-      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 7, 10, "¥#,##0"));
-      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 10, 11, "#,##0"));
-      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 11, 12, "0.00%"));
-      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 12, 13, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 5, 7, "#,##0"));
+      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 7, 8, "0.00%"));
+      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 8, 11, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 11, 12, "#,##0"));
+      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 12, 13, "0.00%"));
+      formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 13, 14, "¥#,##0"));
 
       for (let i = 2; i < creativeRows.length; i += 1) {
-        const rank = String(creativeRows[i][13]);
+        const rank = String(creativeRows[i][14]);
         if (rank in RANK_COLORS) {
           formatRequests.push({
             repeatCell: {
@@ -1205,8 +1212,8 @@ export async function POST(request: NextRequest) {
                 sheetId: creativeSheetId,
                 startRowIndex: i,
                 endRowIndex: i + 1,
-                startColumnIndex: 13,
-                endColumnIndex: 14,
+                startColumnIndex: 14,
+                endColumnIndex: 15,
               },
               cell: { userEnteredFormat: { backgroundColor: RANK_COLORS[rank as "A" | "B" | "C" | "D"] } },
               fields: "userEnteredFormat.backgroundColor",
@@ -1214,6 +1221,38 @@ export async function POST(request: NextRequest) {
           });
         }
       }
+
+      for (let i = 2; i < creativeRows.length; i += 1) {
+        formatRequests.push({
+          updateDimensionProperties: {
+            range: {
+              sheetId: creativeSheetId,
+              dimension: "ROWS",
+              startIndex: i,
+              endIndex: i + 1,
+            },
+            properties: {
+              pixelSize: 60,
+            },
+            fields: "pixelSize",
+          },
+        });
+      }
+
+      formatRequests.push({
+        updateDimensionProperties: {
+          range: {
+            sheetId: creativeSheetId,
+            dimension: "COLUMNS",
+            startIndex: 1,
+            endIndex: 2,
+          },
+          properties: {
+            pixelSize: 80,
+          },
+          fields: "pixelSize",
+        },
+      });
     }
 
     const dailySheetId = sheetIdByName.get("日次推移");

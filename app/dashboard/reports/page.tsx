@@ -128,6 +128,8 @@ export default function ReportsPage() {
   const [error, setError] = useState("");
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetResult, setSheetResult] = useState<{ ok: boolean; url?: string; error?: string } | null>(null);
+  const [slidesLoading, setSlidesLoading] = useState(false);
+  const [slidesResult, setSlidesResult] = useState<{ ok: boolean; url?: string; error?: string } | null>(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
   useEffect(() => {
@@ -346,6 +348,47 @@ export default function ReportsPage() {
       setSheetResult({ ok: false, error: err instanceof Error ? err.message : "エクスポートに失敗しました" });
     } finally {
       setSheetLoading(false);
+    }
+  };
+
+  const onExportSlides = async () => {
+    if (!detail) return;
+
+    setSlidesLoading(true);
+    setSlidesResult(null);
+
+    try {
+      const res = await fetch("/api/reports/export-slides", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectName: selectedProjectName,
+          datePreset,
+          project: detail.project,
+          campaigns: detail.campaigns,
+          creatives: detail.creatives,
+          daily: detail.daily,
+          analysis: {
+            overall: detail.analysis.overall,
+            clientReport: detail.analysis.clientReport,
+          },
+          feeRate,
+          feeCalcMethod: settings.feeCalcMethod,
+          monthlyBudget: budgetProgress?.monthlyBudget ?? null,
+        }),
+      });
+
+      const result = (await res.json()) as { ok?: boolean; presentationUrl?: string; error?: string };
+      if (result.ok && result.presentationUrl) {
+        setSlidesResult({ ok: true, url: result.presentationUrl });
+        window.open(result.presentationUrl, "_blank", "noopener,noreferrer");
+      } else {
+        setSlidesResult({ ok: false, error: result.error || "エクスポートに失敗しました" });
+      }
+    } catch (err) {
+      setSlidesResult({ ok: false, error: err instanceof Error ? err.message : "エクスポートに失敗しました" });
+    } finally {
+      setSlidesLoading(false);
     }
   };
 
@@ -718,6 +761,32 @@ export default function ReportsPage() {
               </a>
             ) : (
               `エラー: ${sheetResult.error}`
+            )}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onExportSlides}
+          disabled={!detail || slidesLoading}
+          className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {slidesLoading ? (
+            <span className="flex items-center gap-2">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              作成中...
+            </span>
+          ) : (
+            "Googleスライドに出力"
+          )}
+        </button>
+        {slidesResult && (
+          <span className={`text-sm ${slidesResult.ok ? "text-amber-600" : "text-red-600"}`}>
+            {slidesResult.ok ? (
+              <a href={slidesResult.url} target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
+                スライドを開く
+              </a>
+            ) : (
+              `エラー: ${slidesResult.error}`
             )}
           </span>
         )}

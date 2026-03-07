@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#bg)"/>
+  <!-- Megaphone / Ad icon -->
+  <polygon points="8,12 8,20 13,20 13,12" fill="white" opacity="0.9"/>
+  <polygon points="13,10 24,6 24,26 13,22" fill="white"/>
+  <!-- Sound waves -->
+  <path d="M25,12 C27,14 27,18 25,20" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <path d="M27,9 C30,13 30,19 27,23" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.4"/>
+  <!-- Yen symbol -->
+  <circle cx="10" cy="25" r="4" fill="#fbbf24"/>
+  <text x="10" y="27.5" text-anchor="middle" font-size="6" font-weight="bold" fill="white">¥</text>
+</svg>

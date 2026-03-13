@@ -72,6 +72,34 @@ interface ClientReportBlock {
   retrospective: string[];
 }
 
+interface DeviceRow {
+  device: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+  ctr: number;
+}
+
+interface DemographicRow {
+  age: string;
+  gender: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+}
+
+interface HourlyRow {
+  date_start: string;
+  hourly_stats_aggregated_by_advertiser_time_zone: string;
+  spend: number;
+  cv: number;
+  cpa: number;
+}
+
 interface ReportData {
   projectName: string;
   datePreset: string;
@@ -92,6 +120,9 @@ interface ReportData {
     cv?: number;
     cpa?: number;
   };
+  deviceBreakdown?: DeviceRow[];
+  demographicBreakdown?: DemographicRow[];
+  hourlyBreakdown?: HourlyRow[];
 }
 
 interface SpreadsheetColor {
@@ -733,6 +764,158 @@ function buildAiRows(data: ReportData): TableRows {
   return rows;
 }
 
+function toDeviceTableRows(devices: DeviceRow[], feeRate: number, feeMethod: "markup" | "margin"): TableRows {
+  const totalSpend = devices.reduce((sum, row) => sum + row.spend, 0);
+  const totalImp = devices.reduce((sum, row) => sum + row.impressions, 0);
+  const totalClicks = devices.reduce((sum, row) => sum + row.clicks, 0);
+  const totalCv = devices.reduce((sum, row) => sum + row.cv, 0);
+
+  const rows: TableRows = [
+    ["デバイス", "表示回数", "クリック数", "クリック率", "ご利用額(Fee抜)", "ご利用額(Fee込)", "獲得件数", "獲得単価", "構成比(費用)"],
+    [
+      "合計",
+      roundInt(totalImp),
+      roundInt(totalClicks),
+      toPercent(calcCtr(totalClicks, totalImp)),
+      roundInt(totalSpend),
+      roundInt(applyFee(totalSpend, feeRate, feeMethod)),
+      roundInt(totalCv),
+      roundInt(calcCpa(totalSpend, totalCv)),
+      1,
+    ],
+  ];
+
+  devices.forEach((row) => {
+    rows.push([
+      row.device,
+      roundInt(row.impressions),
+      roundInt(row.clicks),
+      toPercent(row.ctr),
+      roundInt(row.spend),
+      roundInt(applyFee(row.spend, feeRate, feeMethod)),
+      roundInt(row.cv),
+      roundInt(row.cpa),
+      totalSpend > 0 ? row.spend / totalSpend : 0,
+    ]);
+  });
+
+  return rows;
+}
+
+function toDemographicTableRows(demographics: DemographicRow[]): TableRows {
+  const AGES = ["18-24", "25-34", "35-44", "45-54", "55-64", "65+"];
+  const GENDERS = ["male", "female", "unknown"];
+  const GENDER_JA: Record<string, string> = { male: "男性", female: "女性", unknown: "不明" };
+
+  const rows: TableRows = [];
+
+  // CV heatmap
+  rows.push(["CV数（年齢×性別）"]);
+  rows.push(["", ...AGES]);
+  GENDERS.forEach((gender) => {
+    const row: CellValue[] = [GENDER_JA[gender] || gender];
+    AGES.forEach((age) => {
+      const match = demographics.find((d) => d.age === age && d.gender === gender);
+      row.push(match ? roundInt(match.cv) : 0);
+    });
+    rows.push(row);
+  });
+
+  rows.push([]);
+
+  // CPA heatmap
+  rows.push(["CPA（年齢×性別）"]);
+  rows.push(["", ...AGES]);
+  GENDERS.forEach((gender) => {
+    const row: CellValue[] = [GENDER_JA[gender] || gender];
+    AGES.forEach((age) => {
+      const match = demographics.find((d) => d.age === age && d.gender === gender);
+      row.push(match ? roundInt(match.cpa) : 0);
+    });
+    rows.push(row);
+  });
+
+  rows.push([]);
+
+  // Spend heatmap
+  rows.push(["消化額（年齢×性別）"]);
+  rows.push(["", ...AGES]);
+  GENDERS.forEach((gender) => {
+    const row: CellValue[] = [GENDER_JA[gender] || gender];
+    AGES.forEach((age) => {
+      const match = demographics.find((d) => d.age === age && d.gender === gender);
+      row.push(match ? roundInt(match.spend) : 0);
+    });
+    rows.push(row);
+  });
+
+  return rows;
+}
+
+function toHeatmapTableRows(hourlyData: HourlyRow[]): TableRows {
+  const DAYS_JA = ["月", "火", "水", "木", "金", "土", "日"];
+  const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+  // Aggregate: day of week × hour → { spend, cv }
+  const grid = new Map<string, { spend: number; cv: number }>();
+  hourlyData.forEach((row) => {
+    const date = new Date(`${row.date_start}T00:00:00+09:00`);
+    const jsDow = date.getDay(); // 0=Sun
+    const mondayIndex = jsDow === 0 ? 6 : jsDow - 1; // 0=Mon
+    const hourMatch = row.hourly_stats_aggregated_by_advertiser_time_zone?.match(/^(\d+)/);
+    const hour = hourMatch ? Number.parseInt(hourMatch[1], 10) : 0;
+    const key = `${mondayIndex}-${hour}`;
+    const curr = grid.get(key) ?? { spend: 0, cv: 0 };
+    curr.spend += row.spend;
+    curr.cv += row.cv;
+    grid.set(key, curr);
+  });
+
+  const rows: TableRows = [];
+
+  // CV heatmap
+  rows.push(["CV数（曜日×時間帯）"]);
+  rows.push(["", ...HOURS.map((h) => `${h}時`)]);
+  DAYS_JA.forEach((dayLabel, dayIndex) => {
+    const row: CellValue[] = [dayLabel];
+    HOURS.forEach((hour) => {
+      const cell = grid.get(`${dayIndex}-${hour}`);
+      row.push(cell ? roundInt(cell.cv) : 0);
+    });
+    rows.push(row);
+  });
+
+  rows.push([]);
+
+  // CPA heatmap
+  rows.push(["CPA（曜日×時間帯）"]);
+  rows.push(["", ...HOURS.map((h) => `${h}時`)]);
+  DAYS_JA.forEach((dayLabel, dayIndex) => {
+    const row: CellValue[] = [dayLabel];
+    HOURS.forEach((hour) => {
+      const cell = grid.get(`${dayIndex}-${hour}`);
+      row.push(cell && cell.cv > 0 ? roundInt(cell.spend / cell.cv) : 0);
+    });
+    rows.push(row);
+  });
+
+  rows.push([]);
+
+  // Spend heatmap
+  rows.push(["消化額（曜日×時間帯）"]);
+  rows.push(["", ...HOURS.map((h) => `${h}時`)]);
+  DAYS_JA.forEach((dayLabel, dayIndex) => {
+    const row: CellValue[] = [dayLabel];
+    HOURS.forEach((hour) => {
+      const cell = grid.get(`${dayIndex}-${hour}`);
+      row.push(cell ? roundInt(cell.spend) : 0);
+    });
+    rows.push(row);
+  });
+
+  return rows;
+}
+
 function headerRequest(sheetId: number, rowIndex: number, colCount: number) {
   return {
     repeatCell: {
@@ -893,6 +1076,9 @@ export async function POST(request: NextRequest) {
           { properties: { title: "クリエイティブ別", index: 5, tabColor: ORANGE } },
           { properties: { title: "日次推移", index: 6, tabColor: TEAL } },
           { properties: { title: "AI分析", index: 7, tabColor: PURPLE } },
+          { properties: { title: "デバイス別", index: 8, tabColor: TEAL } },
+          { properties: { title: "属性別(年齢×性別)", index: 9, tabColor: GREEN } },
+          { properties: { title: "曜日×時間帯", index: 10, tabColor: ORANGE } },
         ],
       },
     );
@@ -962,6 +1148,9 @@ export async function POST(request: NextRequest) {
     const creativeRows = toCreativeTableRows(data.creatives, feeRate, feeMethod);
     const dailyTrendRows = buildDailyTrendRows(period, data.daily, feeRate, feeMethod);
     const aiRows = buildAiRows(data);
+    const deviceRows = toDeviceTableRows(data.deviceBreakdown ?? [], feeRate, feeMethod);
+    const demographicRows = toDemographicTableRows(data.demographicBreakdown ?? []);
+    const heatmapRows = toHeatmapTableRows(data.hourlyBreakdown ?? []);
 
     await googleApiFetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
@@ -977,6 +1166,9 @@ export async function POST(request: NextRequest) {
           { range: "クリエイティブ別!A1", values: creativeRows },
           { range: "日次推移!A1", values: dailyTrendRows },
           { range: "AI分析!A1", values: aiRows },
+          { range: "デバイス別!A1", values: deviceRows },
+          { range: "'属性別(年齢×性別)'!A1", values: demographicRows },
+          { range: "'曜日×時間帯'!A1", values: heatmapRows },
         ],
       },
     );
@@ -1335,6 +1527,74 @@ export async function POST(request: NextRequest) {
       formatRequests.push({
         autoResizeDimensions: {
           dimensions: { sheetId: aiSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 2 },
+        },
+      });
+    }
+
+    // Device breakdown formatting
+    const deviceSheetId = sheetIdByName.get("デバイス別");
+    if (deviceSheetId !== undefined) {
+      appendCommonTableStyle("デバイス別", deviceRows, [0], [1]);
+      formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 1, 3, "#,##0"));
+      formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 3, 4, "0.00%"));
+      formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 4, 6, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 6, 7, "#,##0"));
+      formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 7, 8, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 8, 9, "0.0%"));
+    }
+
+    // Demographic breakdown formatting
+    const demoSheetId = sheetIdByName.get("属性別(年齢×性別)");
+    if (demoSheetId !== undefined) {
+      // Section headers (CV, CPA, Spend)
+      [0, 5, 10].forEach((rowIndex) => {
+        formatRequests.push(headerRequest(demoSheetId, rowIndex, 7));
+      });
+      // Sub-headers (age labels)
+      [1, 6, 11].forEach((rowIndex) => {
+        formatRequests.push({
+          repeatCell: {
+            range: { sheetId: demoSheetId, startRowIndex: rowIndex, endRowIndex: rowIndex + 1, startColumnIndex: 0, endColumnIndex: 7 },
+            cell: { userEnteredFormat: { backgroundColor: LIGHT_GRAY, textFormat: { bold: true } } },
+            fields: "userEnteredFormat(backgroundColor,textFormat)",
+          },
+        });
+      });
+      formatRequests.push(numberFormatRequest(demoSheetId, 2, 5, 1, 7, "#,##0"));
+      formatRequests.push(numberFormatRequest(demoSheetId, 7, 10, 1, 7, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(demoSheetId, 12, 15, 1, 7, "¥#,##0"));
+      formatRequests.push(borderRequest(demoSheetId, 0, demographicRows.length, 0, 7));
+      formatRequests.push({
+        autoResizeDimensions: {
+          dimensions: { sheetId: demoSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 7 },
+        },
+      });
+    }
+
+    // Hourly heatmap formatting
+    const heatmapSheetId = sheetIdByName.get("曜日×時間帯");
+    if (heatmapSheetId !== undefined) {
+      // Section headers
+      [0, 10, 20].forEach((rowIndex) => {
+        formatRequests.push(headerRequest(heatmapSheetId, rowIndex, 25));
+      });
+      // Sub-headers (hour labels)
+      [1, 11, 21].forEach((rowIndex) => {
+        formatRequests.push({
+          repeatCell: {
+            range: { sheetId: heatmapSheetId, startRowIndex: rowIndex, endRowIndex: rowIndex + 1, startColumnIndex: 0, endColumnIndex: 25 },
+            cell: { userEnteredFormat: { backgroundColor: LIGHT_GRAY, textFormat: { bold: true, fontSize: 9 } } },
+            fields: "userEnteredFormat(backgroundColor,textFormat)",
+          },
+        });
+      });
+      formatRequests.push(numberFormatRequest(heatmapSheetId, 2, 9, 1, 25, "#,##0"));
+      formatRequests.push(numberFormatRequest(heatmapSheetId, 12, 19, 1, 25, "¥#,##0"));
+      formatRequests.push(numberFormatRequest(heatmapSheetId, 22, 29, 1, 25, "¥#,##0"));
+      formatRequests.push(borderRequest(heatmapSheetId, 0, heatmapRows.length, 0, 25));
+      formatRequests.push({
+        autoResizeDimensions: {
+          dimensions: { sheetId: heatmapSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 25 },
         },
       });
     }

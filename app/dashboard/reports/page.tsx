@@ -67,6 +67,34 @@ interface DailyRow {
   cpa: number;
 }
 
+interface DeviceData {
+  device: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+  ctr: number;
+}
+
+interface DemographicData {
+  age: string;
+  gender: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+}
+
+interface HourlyData {
+  date_start: string;
+  hourly_stats_aggregated_by_advertiser_time_zone: string;
+  spend: number;
+  cv: number;
+  cpa: number;
+}
+
 interface ProjectDetailResponse {
   project: {
     id: string;
@@ -89,6 +117,9 @@ interface ProjectDetailResponse {
     creative: AnalysisResult;
     clientReport: ClientReportResult;
   };
+  deviceBreakdown?: DeviceData[];
+  demographicBreakdown?: DemographicData[];
+  hourlyBreakdown?: HourlyData[];
 }
 
 function formatCurrency(value: number): string {
@@ -353,6 +384,9 @@ export default function ReportsPage() {
           feeRate,
           feeCalcMethod: settings.feeCalcMethod,
           monthlyBudget: budgetProgress?.monthlyBudget ?? null,
+          deviceBreakdown: detail.deviceBreakdown ?? [],
+          demographicBreakdown: detail.demographicBreakdown ?? [],
+          hourlyBreakdown: detail.hourlyBreakdown ?? [],
         }),
       });
 

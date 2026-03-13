@@ -1008,6 +1008,129 @@ function numberFormatRequest(
   };
 }
 
+function colWidthRequest(sheetId: number, startCol: number, endCol: number, px: number) {
+  return {
+    updateDimensionProperties: {
+      range: { sheetId, dimension: "COLUMNS", startIndex: startCol, endIndex: endCol },
+      properties: { pixelSize: px },
+      fields: "pixelSize",
+    },
+  };
+}
+
+function freezeRequest(sheetId: number, rows: number, cols = 0) {
+  return {
+    updateSheetProperties: {
+      properties: { sheetId, gridProperties: { frozenRowCount: rows, frozenColumnCount: cols } },
+      fields: "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
+    },
+  };
+}
+
+function alternateRowRequests(sheetId: number, startRow: number, endRow: number, colCount: number) {
+  const reqs: Array<Record<string, unknown>> = [];
+  for (let i = startRow; i < endRow; i += 1) {
+    if ((i - startRow) % 2 === 1) {
+      reqs.push({
+        repeatCell: {
+          range: { sheetId, startRowIndex: i, endRowIndex: i + 1, startColumnIndex: 0, endColumnIndex: colCount },
+          cell: { userEnteredFormat: { backgroundColor: ALTERNATE_ROW } },
+          fields: "userEnteredFormat.backgroundColor",
+        },
+      });
+    }
+  }
+  return reqs;
+}
+
+function rightAlignRequest(sheetId: number, startRow: number, endRow: number, startCol: number, endCol: number) {
+  return {
+    repeatCell: {
+      range: { sheetId, startRowIndex: startRow, endRowIndex: endRow, startColumnIndex: startCol, endColumnIndex: endCol },
+      cell: { userEnteredFormat: { horizontalAlignment: "RIGHT" } },
+      fields: "userEnteredFormat.horizontalAlignment",
+    },
+  };
+}
+
+function conditionalGradient(sheetId: number, startRow: number, endRow: number, startCol: number, endCol: number, inverted = false) {
+  const lowColor = inverted ? { red: 0.17, green: 0.32, blue: 0.51 } : { red: 0.96, green: 0.97, blue: 0.98 };
+  const highColor = inverted ? { red: 0.96, green: 0.97, blue: 0.98 } : { red: 0.17, green: 0.32, blue: 0.51 };
+  return {
+    addConditionalFormatRule: {
+      rule: {
+        ranges: [{ sheetId, startRowIndex: startRow, endRowIndex: endRow, startColumnIndex: startCol, endColumnIndex: endCol }],
+        gradientRule: {
+          minpoint: { color: lowColor, type: "MIN" },
+          midpoint: { color: { red: 0.7, green: 0.84, blue: 0.95 }, type: "PERCENTILE", value: "50" },
+          maxpoint: { color: highColor, type: "MAX" },
+        },
+      },
+      index: 0,
+    },
+  };
+}
+
+function chartRequest(
+  sheetId: number,
+  titleText: string,
+  chartType: string,
+  domainRange: Record<string, unknown>,
+  seriesRanges: Array<Record<string, unknown>>,
+  anchorRow: number,
+  anchorCol: number,
+  width = 600,
+  height = 350,
+  isPie = false,
+) {
+  const colors = [BLUE, { red: 0.02, green: 0.588, blue: 0.412 }, { red: 0.851, green: 0.467, blue: 0.024 }];
+  const targetAxis = chartType === "BAR" ? "BOTTOM_AXIS" : "LEFT_AXIS";
+  const series = seriesRanges.map((sr, i) => ({
+    series: { sourceRange: { sources: [sr] } },
+    targetAxis,
+    ...(i < colors.length ? { colorStyle: { rgbColor: colors[i] } } : {}),
+  }));
+
+  const spec: Record<string, unknown> = isPie
+    ? {
+        title: titleText,
+        pieChart: {
+          legendPosition: "RIGHT_LEGEND",
+          domain: { sourceRange: { sources: [domainRange] } },
+          series: series[0]?.series ?? {},
+          threeDimensional: false,
+        },
+      }
+    : {
+        title: titleText,
+        basicChart: {
+          chartType,
+          legendPosition: "BOTTOM_LEGEND",
+          axis: [{ position: "BOTTOM_AXIS", title: "" }, { position: "LEFT_AXIS", title: "" }],
+          domains: [{ domain: { sourceRange: { sources: [domainRange] } } }],
+          series,
+          headerCount: 1,
+        },
+      };
+
+  return {
+    addChart: {
+      chart: {
+        spec,
+        position: {
+          overlayPosition: {
+            anchorCell: { sheetId, rowIndex: anchorRow, columnIndex: anchorCol },
+            offsetXPixels: 0,
+            offsetYPixels: 0,
+            widthPixels: width,
+            heightPixels: height,
+          },
+        },
+      },
+    },
+  };
+}
+
 async function googleApiFetch<T>(url: string, accessToken: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
@@ -1184,160 +1307,100 @@ export async function POST(request: NextRequest) {
 
     const formatRequests: Array<Record<string, unknown>> = [];
 
-    const appendCommonTableStyle = (sheetName: string, rows: TableRows, headerRows: number[], totalRows: number[]) => {
-      const sheetId = sheetIdByName.get(sheetName);
-      if (sheetId === undefined) return;
-
-      const colCount = rows[0]?.length ?? 1;
-      headerRows.forEach((rowIndex) => {
-        formatRequests.push(headerRequest(sheetId, rowIndex, colCount));
-      });
-      totalRows.forEach((rowIndex) => {
-        formatRequests.push(totalRowRequest(sheetId, rowIndex, colCount));
-      });
-      formatRequests.push(borderRequest(sheetId, 0, rows.length, 0, colCount));
-      formatRequests.push({
-        autoResizeDimensions: {
-          dimensions: {
-            sheetId,
-            dimension: "COLUMNS",
-            startIndex: 0,
-            endIndex: Math.max(colCount, 1),
-          },
-        },
-      });
-    };
-
+    // ── 表紙 ──
     const coverSheetId = sheetIdByName.get("表紙");
     if (coverSheetId !== undefined) {
-      formatRequests.push({
-        mergeCells: {
-          range: {
-            sheetId: coverSheetId,
-            startRowIndex: 2,
-            endRowIndex: 3,
-            startColumnIndex: 0,
-            endColumnIndex: 6,
-          },
-          mergeType: "MERGE_ALL",
-        },
-      });
-
+      const COVER_BG: SpreadsheetColor = { red: 0.067, green: 0.11, blue: 0.2 };
       formatRequests.push({
         repeatCell: {
-          range: {
-            sheetId: coverSheetId,
-            startRowIndex: 2,
-            endRowIndex: 3,
-            startColumnIndex: 0,
-            endColumnIndex: 1,
-          },
-          cell: {
-            userEnteredFormat: {
-              textFormat: { fontSize: 18, bold: true, foregroundColor: NAVY },
-            },
-          },
-          fields: "userEnteredFormat.textFormat",
+          range: { sheetId: coverSheetId, startRowIndex: 0, endRowIndex: coverRows.length + 2, startColumnIndex: 0, endColumnIndex: 8 },
+          cell: { userEnteredFormat: { backgroundColor: COVER_BG, textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, fontSize: 12 } } },
+          fields: "userEnteredFormat(backgroundColor,textFormat)",
         },
       });
-
+      formatRequests.push({
+        mergeCells: { range: { sheetId: coverSheetId, startRowIndex: 2, endRowIndex: 3, startColumnIndex: 0, endColumnIndex: 6 }, mergeType: "MERGE_ALL" },
+      });
       formatRequests.push({
         repeatCell: {
-          range: {
-            sheetId: coverSheetId,
-            startRowIndex: 2,
-            endRowIndex: coverRows.length,
-            startColumnIndex: 0,
-            endColumnIndex: 6,
-          },
-          cell: {
-            userEnteredFormat: {
-              textFormat: { foregroundColor: NAVY, fontSize: 12 },
-            },
-          },
-          fields: "userEnteredFormat.textFormat",
+          range: { sheetId: coverSheetId, startRowIndex: 2, endRowIndex: 3, startColumnIndex: 0, endColumnIndex: 1 },
+          cell: { userEnteredFormat: { textFormat: { fontSize: 22, bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, horizontalAlignment: "CENTER" } },
+          fields: "userEnteredFormat(textFormat,horizontalAlignment)",
         },
       });
-
-      formatRequests.push({
-        autoResizeDimensions: {
-          dimensions: {
-            sheetId: coverSheetId,
-            dimension: "COLUMNS",
-            startIndex: 0,
-            endIndex: 6,
-          },
-        },
-      });
+      for (let c = 0; c < 8; c++) formatRequests.push(colWidthRequest(coverSheetId, c, c + 1, 100));
     }
 
+    // ── サマリー ──
     const summarySheetId = sheetIdByName.get("サマリー");
     if (summarySheetId !== undefined) {
-      const summaryStartRowIndex = 2;
-      const summaryEndRowIndex = summaryStartRowIndex + summaryRows.length;
-      [2, 7, 13].forEach((rowIndex) => {
-        formatRequests.push(headerRequest(summarySheetId, rowIndex, 6));
-      });
-      formatRequests.push(borderRequest(summarySheetId, summaryStartRowIndex, summaryEndRowIndex, 0, 6));
+      const se = 2 + summaryRows.length;
+      [2, 7, 13].forEach((r) => formatRequests.push(headerRequest(summarySheetId, r, 6)));
+      formatRequests.push(borderRequest(summarySheetId, 2, se, 0, 6));
       formatRequests.push(numberFormatRequest(summarySheetId, 3, 6, 1, 2, "¥#,##0"));
       formatRequests.push(numberFormatRequest(summarySheetId, 3, 6, 2, 3, "0.0%"));
-      formatRequests.push(numberFormatRequest(summarySheetId, 8, 10, 1, 2, "¥#,##0"));
-      formatRequests.push(numberFormatRequest(summarySheetId, 11, 12, 1, 2, "¥#,##0"));
-      formatRequests.push({
-        autoResizeDimensions: {
-          dimensions: { sheetId: summarySheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 10 },
-        },
-      });
+      formatRequests.push(numberFormatRequest(summarySheetId, 8, 12, 1, 2, "¥#,##0"));
+      formatRequests.push(...alternateRowRequests(summarySheetId, 3, 6, 6));
+      formatRequests.push(...alternateRowRequests(summarySheetId, 8, 12, 6));
+      formatRequests.push(colWidthRequest(summarySheetId, 0, 1, 180));
+      formatRequests.push(colWidthRequest(summarySheetId, 1, 2, 140));
+      formatRequests.push(colWidthRequest(summarySheetId, 2, 3, 140));
     }
 
+    // ── 全体概要 ──
     const overviewSheetId = sheetIdByName.get("全体概要");
     if (overviewSheetId !== undefined) {
       formatRequests.push(headerRequest(overviewSheetId, 4, 9));
       formatRequests.push(headerRequest(overviewSheetId, 11, 9));
-      formatRequests.push({
-        repeatCell: {
-          range: {
-            sheetId: overviewSheetId,
-            startRowIndex: 5,
-            endRowIndex: overviewRows.length,
-            startColumnIndex: 0,
-            endColumnIndex: 9,
-          },
-          cell: { userEnteredFormat: { horizontalAlignment: "RIGHT" } },
-          fields: "userEnteredFormat.horizontalAlignment",
-        },
-      });
-      formatRequests.push({
-        repeatCell: {
-          range: {
-            sheetId: overviewSheetId,
-            startRowIndex: 12,
-            endRowIndex: overviewRows.length,
-            startColumnIndex: 0,
-            endColumnIndex: 9,
-          },
-          cell: { userEnteredFormat: { backgroundColor: ALTERNATE_ROW } },
-          fields: "userEnteredFormat.backgroundColor",
-        },
-      });
+      formatRequests.push(rightAlignRequest(overviewSheetId, 5, overviewRows.length, 1, 9));
+      formatRequests.push(...alternateRowRequests(overviewSheetId, 12, overviewRows.length, 9));
       formatRequests.push(numberFormatRequest(overviewSheetId, 5, overviewRows.length, 1, 3, "#,##0"));
       formatRequests.push(numberFormatRequest(overviewSheetId, 5, overviewRows.length, 3, 4, "0.00%"));
       formatRequests.push(numberFormatRequest(overviewSheetId, 5, overviewRows.length, 4, 6, "¥#,##0"));
       formatRequests.push(numberFormatRequest(overviewSheetId, 5, overviewRows.length, 6, 7, "#,##0"));
       formatRequests.push(numberFormatRequest(overviewSheetId, 5, overviewRows.length, 7, 8, "0.00%"));
       formatRequests.push(numberFormatRequest(overviewSheetId, 5, overviewRows.length, 8, 9, "¥#,##0"));
-      formatRequests.push(borderRequest(overviewSheetId, 4, overviewRows.length, 0, 9));
-      formatRequests.push({
-        autoResizeDimensions: {
-          dimensions: { sheetId: overviewSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 9 },
-        },
-      });
+      formatRequests.push(borderRequest(overviewSheetId, 4, 8, 0, 9));
+      formatRequests.push(borderRequest(overviewSheetId, 11, overviewRows.length, 0, 9));
+      formatRequests.push(colWidthRequest(overviewSheetId, 0, 1, 110));
+      for (let c = 1; c < 9; c++) formatRequests.push(colWidthRequest(overviewSheetId, c, c + 1, 110));
     }
 
-    appendCommonTableStyle("キャンペーン別", campaignRows, [0], [1]);
-    appendCommonTableStyle("広告セット別", adsetRows, [0], [1]);
-    appendCommonTableStyle("クリエイティブ別", creativeRows, [0], [1]);
+    // ── Table formatter helper ──
+    const formatTable = (name: string, rows: TableRows, numStartCol: number, rankColIndex?: number) => {
+      const id = sheetIdByName.get(name);
+      if (id === undefined) return;
+      const cols = rows[0]?.length ?? 1;
+      formatRequests.push(headerRequest(id, 0, cols));
+      formatRequests.push(totalRowRequest(id, 1, cols));
+      formatRequests.push(borderRequest(id, 0, rows.length, 0, cols));
+      formatRequests.push(rightAlignRequest(id, 1, rows.length, numStartCol, cols));
+      formatRequests.push(...alternateRowRequests(id, 2, rows.length, cols));
+      formatRequests.push(freezeRequest(id, 1));
+      // Column widths: No. col narrow, name cols wide, number cols fixed
+      formatRequests.push(colWidthRequest(id, 0, 1, 40));
+      for (let c = 1; c < Math.min(numStartCol, cols); c++) formatRequests.push(colWidthRequest(id, c, c + 1, 170));
+      for (let c = numStartCol; c < cols; c++) formatRequests.push(colWidthRequest(id, c, c + 1, 95));
+      // Rank column
+      if (rankColIndex !== undefined) {
+        formatRequests.push(colWidthRequest(id, rankColIndex, rankColIndex + 1, 55));
+        for (let i = 2; i < rows.length; i += 1) {
+          const rank = String(rows[i][rankColIndex]);
+          if (rank in RANK_COLORS) {
+            formatRequests.push({
+              repeatCell: {
+                range: { sheetId: id, startRowIndex: i, endRowIndex: i + 1, startColumnIndex: rankColIndex, endColumnIndex: rankColIndex + 1 },
+                cell: { userEnteredFormat: { backgroundColor: RANK_COLORS[rank as "A" | "B" | "C" | "D"], horizontalAlignment: "CENTER", textFormat: { bold: true } } },
+                fields: "userEnteredFormat(backgroundColor,horizontalAlignment,textFormat)",
+              },
+            });
+          }
+        }
+      }
+    };
 
+    // ── キャンペーン別 ──
+    formatTable("キャンペーン別", campaignRows, 2, 12);
     const campaignSheetId = sheetIdByName.get("キャンペーン別");
     if (campaignSheetId !== undefined) {
       formatRequests.push(numberFormatRequest(campaignSheetId, 1, campaignRows.length, 2, 4, "#,##0"));
@@ -1347,276 +1410,205 @@ export async function POST(request: NextRequest) {
       formatRequests.push(numberFormatRequest(campaignSheetId, 1, campaignRows.length, 9, 10, "0.00%"));
       formatRequests.push(numberFormatRequest(campaignSheetId, 1, campaignRows.length, 10, 11, "¥#,##0"));
       formatRequests.push(numberFormatRequest(campaignSheetId, 1, campaignRows.length, 11, 12, "0.00"));
-
-      for (let i = 2; i < campaignRows.length; i += 1) {
-        const rank = String(campaignRows[i][12]);
-        if (rank in RANK_COLORS) {
-          formatRequests.push({
-            repeatCell: {
-              range: {
-                sheetId: campaignSheetId,
-                startRowIndex: i,
-                endRowIndex: i + 1,
-                startColumnIndex: 12,
-                endColumnIndex: 13,
-              },
-              cell: { userEnteredFormat: { backgroundColor: RANK_COLORS[rank as "A" | "B" | "C" | "D"] } },
-              fields: "userEnteredFormat.backgroundColor",
-            },
-          });
-        }
-      }
     }
 
+    // ── 広告セット別 ──
+    formatTable("広告セット別", adsetRows, 3, 12);
     const adsetSheetId = sheetIdByName.get("広告セット別");
     if (adsetSheetId !== undefined) {
+      formatRequests.push(colWidthRequest(adsetSheetId, 1, 2, 160));
+      formatRequests.push(colWidthRequest(adsetSheetId, 2, 3, 150));
       formatRequests.push(numberFormatRequest(adsetSheetId, 1, adsetRows.length, 3, 5, "#,##0"));
       formatRequests.push(numberFormatRequest(adsetSheetId, 1, adsetRows.length, 5, 6, "0.00%"));
       formatRequests.push(numberFormatRequest(adsetSheetId, 1, adsetRows.length, 6, 9, "¥#,##0"));
       formatRequests.push(numberFormatRequest(adsetSheetId, 1, adsetRows.length, 9, 10, "#,##0"));
       formatRequests.push(numberFormatRequest(adsetSheetId, 1, adsetRows.length, 10, 11, "0.00%"));
       formatRequests.push(numberFormatRequest(adsetSheetId, 1, adsetRows.length, 11, 12, "¥#,##0"));
-
-      for (let i = 2; i < adsetRows.length; i += 1) {
-        const rank = String(adsetRows[i][12]);
-        if (rank in RANK_COLORS) {
-          formatRequests.push({
-            repeatCell: {
-              range: {
-                sheetId: adsetSheetId,
-                startRowIndex: i,
-                endRowIndex: i + 1,
-                startColumnIndex: 12,
-                endColumnIndex: 13,
-              },
-              cell: { userEnteredFormat: { backgroundColor: RANK_COLORS[rank as "A" | "B" | "C" | "D"] } },
-              fields: "userEnteredFormat.backgroundColor",
-            },
-          });
-        }
-      }
     }
 
+    // ── クリエイティブ別 ──
+    formatTable("クリエイティブ別", creativeRows, 5, 14);
     const creativeSheetId = sheetIdByName.get("クリエイティブ別");
     if (creativeSheetId !== undefined) {
+      formatRequests.push(colWidthRequest(creativeSheetId, 1, 2, 80));
+      formatRequests.push(colWidthRequest(creativeSheetId, 2, 3, 150));
+      formatRequests.push(colWidthRequest(creativeSheetId, 3, 4, 140));
+      formatRequests.push(colWidthRequest(creativeSheetId, 4, 5, 160));
       formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 5, 7, "#,##0"));
       formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 7, 8, "0.00%"));
       formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 8, 11, "¥#,##0"));
       formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 11, 12, "#,##0"));
       formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 12, 13, "0.00%"));
       formatRequests.push(numberFormatRequest(creativeSheetId, 1, creativeRows.length, 13, 14, "¥#,##0"));
-
-      for (let i = 2; i < creativeRows.length; i += 1) {
-        const rank = String(creativeRows[i][14]);
-        if (rank in RANK_COLORS) {
-          formatRequests.push({
-            repeatCell: {
-              range: {
-                sheetId: creativeSheetId,
-                startRowIndex: i,
-                endRowIndex: i + 1,
-                startColumnIndex: 14,
-                endColumnIndex: 15,
-              },
-              cell: { userEnteredFormat: { backgroundColor: RANK_COLORS[rank as "A" | "B" | "C" | "D"] } },
-              fields: "userEnteredFormat.backgroundColor",
-            },
-          });
-        }
-      }
-
       for (let i = 2; i < creativeRows.length; i += 1) {
         formatRequests.push({
           updateDimensionProperties: {
-            range: {
-              sheetId: creativeSheetId,
-              dimension: "ROWS",
-              startIndex: i,
-              endIndex: i + 1,
-            },
-            properties: {
-              pixelSize: 60,
-            },
+            range: { sheetId: creativeSheetId, dimension: "ROWS", startIndex: i, endIndex: i + 1 },
+            properties: { pixelSize: 60 },
             fields: "pixelSize",
           },
         });
       }
-
-      formatRequests.push({
-        updateDimensionProperties: {
-          range: {
-            sheetId: creativeSheetId,
-            dimension: "COLUMNS",
-            startIndex: 1,
-            endIndex: 2,
-          },
-          properties: {
-            pixelSize: 80,
-          },
-          fields: "pixelSize",
-        },
-      });
     }
 
+    // ── 日次推移 ──
     const dailySheetId = sheetIdByName.get("日次推移");
     if (dailySheetId !== undefined) {
       formatRequests.push(headerRequest(dailySheetId, 0, 11));
       formatRequests.push(totalRowRequest(dailySheetId, dailyTrendRows.length - 1, 11));
+      formatRequests.push(borderRequest(dailySheetId, 0, dailyTrendRows.length, 0, 11));
+      formatRequests.push(rightAlignRequest(dailySheetId, 1, dailyTrendRows.length, 2, 11));
+      formatRequests.push(...alternateRowRequests(dailySheetId, 1, dailyTrendRows.length - 1, 11));
+      formatRequests.push(freezeRequest(dailySheetId, 1));
       formatRequests.push(numberFormatRequest(dailySheetId, 1, dailyTrendRows.length, 2, 4, "#,##0"));
       formatRequests.push(numberFormatRequest(dailySheetId, 1, dailyTrendRows.length, 4, 5, "0.00%"));
       formatRequests.push(numberFormatRequest(dailySheetId, 1, dailyTrendRows.length, 5, 8, "¥#,##0"));
       formatRequests.push(numberFormatRequest(dailySheetId, 1, dailyTrendRows.length, 8, 9, "#,##0"));
       formatRequests.push(numberFormatRequest(dailySheetId, 1, dailyTrendRows.length, 9, 10, "0.00%"));
       formatRequests.push(numberFormatRequest(dailySheetId, 1, dailyTrendRows.length, 10, 11, "¥#,##0"));
-      formatRequests.push(borderRequest(dailySheetId, 0, dailyTrendRows.length, 0, 11));
-
       for (let i = 1; i < dailyTrendRows.length - 1; i += 1) {
-        const weekday = String(dailyTrendRows[i][1]);
-        if (weekday === "土" || weekday === "日") {
+        if (String(dailyTrendRows[i][1]) === "土" || String(dailyTrendRows[i][1]) === "日") {
           formatRequests.push({
             repeatCell: {
-              range: {
-                sheetId: dailySheetId,
-                startRowIndex: i,
-                endRowIndex: i + 1,
-                startColumnIndex: 0,
-                endColumnIndex: 11,
-              },
-              cell: {
-                userEnteredFormat: {
-                  backgroundColor: WEEKEND_BG,
-                },
-              },
+              range: { sheetId: dailySheetId, startRowIndex: i, endRowIndex: i + 1, startColumnIndex: 0, endColumnIndex: 11 },
+              cell: { userEnteredFormat: { backgroundColor: WEEKEND_BG } },
               fields: "userEnteredFormat.backgroundColor",
             },
           });
         }
       }
-
-      formatRequests.push({
-        autoResizeDimensions: {
-          dimensions: { sheetId: dailySheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 11 },
-        },
-      });
+      formatRequests.push(colWidthRequest(dailySheetId, 0, 1, 100));
+      formatRequests.push(colWidthRequest(dailySheetId, 1, 2, 40));
+      for (let c = 2; c < 11; c++) formatRequests.push(colWidthRequest(dailySheetId, c, c + 1, 95));
+      // Chart: Daily spend line
+      formatRequests.push(chartRequest(dailySheetId, "日次消化額推移", "LINE",
+        { sheetId: dailySheetId, startRowIndex: 0, endRowIndex: dailyTrendRows.length - 1, startColumnIndex: 0, endColumnIndex: 1 },
+        [{ sheetId: dailySheetId, startRowIndex: 0, endRowIndex: dailyTrendRows.length - 1, startColumnIndex: 6, endColumnIndex: 7 }],
+        dailyTrendRows.length + 2, 0, 750, 320));
+      // Chart: Daily CV bar
+      formatRequests.push(chartRequest(dailySheetId, "日次CV数推移", "COLUMN",
+        { sheetId: dailySheetId, startRowIndex: 0, endRowIndex: dailyTrendRows.length - 1, startColumnIndex: 0, endColumnIndex: 1 },
+        [{ sheetId: dailySheetId, startRowIndex: 0, endRowIndex: dailyTrendRows.length - 1, startColumnIndex: 8, endColumnIndex: 9 }],
+        dailyTrendRows.length + 2, 8, 750, 320));
     }
 
+    // ── AI分析 ──
     const aiSheetId = sheetIdByName.get("AI分析");
     if (aiSheetId !== undefined) {
-      [0, 5, 9, 12].forEach((rowIndex) => {
-        formatRequests.push(headerRequest(aiSheetId, rowIndex, 2));
-      });
+      [0, 5, 9, 12].forEach((r) => formatRequests.push(headerRequest(aiSheetId, r, 2)));
       formatRequests.push(borderRequest(aiSheetId, 0, aiRows.length, 0, 2));
       formatRequests.push({
         repeatCell: {
-          range: {
-            sheetId: aiSheetId,
-            startRowIndex: 0,
-            endRowIndex: aiRows.length,
-            startColumnIndex: 0,
-            endColumnIndex: 2,
-          },
-          cell: {
-            userEnteredFormat: {
-              wrapStrategy: "WRAP",
-              verticalAlignment: "TOP",
-            },
-          },
+          range: { sheetId: aiSheetId, startRowIndex: 0, endRowIndex: aiRows.length, startColumnIndex: 0, endColumnIndex: 2 },
+          cell: { userEnteredFormat: { wrapStrategy: "WRAP", verticalAlignment: "TOP" } },
           fields: "userEnteredFormat(wrapStrategy,verticalAlignment)",
         },
       });
-      formatRequests.push({
-        autoResizeDimensions: {
-          dimensions: { sheetId: aiSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 2 },
-        },
-      });
+      formatRequests.push(colWidthRequest(aiSheetId, 0, 1, 140));
+      formatRequests.push(colWidthRequest(aiSheetId, 1, 2, 550));
     }
 
-    // Device breakdown formatting
+    // ── デバイス別 ──
     const deviceSheetId = sheetIdByName.get("デバイス別");
     if (deviceSheetId !== undefined) {
-      appendCommonTableStyle("デバイス別", deviceRows, [0], [1]);
+      formatRequests.push(headerRequest(deviceSheetId, 0, 9));
+      formatRequests.push(totalRowRequest(deviceSheetId, 1, 9));
+      formatRequests.push(borderRequest(deviceSheetId, 0, deviceRows.length, 0, 9));
+      formatRequests.push(rightAlignRequest(deviceSheetId, 1, deviceRows.length, 1, 9));
+      formatRequests.push(...alternateRowRequests(deviceSheetId, 2, deviceRows.length, 9));
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 1, 3, "#,##0"));
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 3, 4, "0.00%"));
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 4, 6, "¥#,##0"));
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 6, 7, "#,##0"));
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 7, 8, "¥#,##0"));
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 8, 9, "0.0%"));
+      formatRequests.push(colWidthRequest(deviceSheetId, 0, 1, 140));
+      for (let c = 1; c < 9; c++) formatRequests.push(colWidthRequest(deviceSheetId, c, c + 1, 100));
+      // Pie chart: spend share
+      formatRequests.push(chartRequest(deviceSheetId, "デバイス別 消化構成比", "PIE",
+        { sheetId: deviceSheetId, startRowIndex: 1, endRowIndex: deviceRows.length, startColumnIndex: 0, endColumnIndex: 1 },
+        [{ sheetId: deviceSheetId, startRowIndex: 1, endRowIndex: deviceRows.length, startColumnIndex: 4, endColumnIndex: 5 }],
+        deviceRows.length + 2, 0, 450, 320, true));
+      // Bar chart: CPA comparison
+      formatRequests.push(chartRequest(deviceSheetId, "デバイス別 CPA比較", "BAR",
+        { sheetId: deviceSheetId, startRowIndex: 1, endRowIndex: deviceRows.length, startColumnIndex: 0, endColumnIndex: 1 },
+        [{ sheetId: deviceSheetId, startRowIndex: 1, endRowIndex: deviceRows.length, startColumnIndex: 7, endColumnIndex: 8 }],
+        deviceRows.length + 2, 5, 450, 320));
     }
 
-    // Demographic breakdown formatting
+    // ── 属性別(年齢×性別) ──
     const demoSheetId = sheetIdByName.get("属性別(年齢×性別)");
     if (demoSheetId !== undefined) {
-      // Section headers (CV, CPA, Spend)
-      [0, 5, 10].forEach((rowIndex) => {
-        formatRequests.push(headerRequest(demoSheetId, rowIndex, 7));
-      });
-      // Sub-headers (age labels)
-      [1, 6, 11].forEach((rowIndex) => {
+      [0, 5, 10].forEach((r) => formatRequests.push(headerRequest(demoSheetId, r, 7)));
+      [1, 6, 11].forEach((r) => {
         formatRequests.push({
           repeatCell: {
-            range: { sheetId: demoSheetId, startRowIndex: rowIndex, endRowIndex: rowIndex + 1, startColumnIndex: 0, endColumnIndex: 7 },
-            cell: { userEnteredFormat: { backgroundColor: LIGHT_GRAY, textFormat: { bold: true } } },
-            fields: "userEnteredFormat(backgroundColor,textFormat)",
+            range: { sheetId: demoSheetId, startRowIndex: r, endRowIndex: r + 1, startColumnIndex: 0, endColumnIndex: 7 },
+            cell: { userEnteredFormat: { backgroundColor: LIGHT_GRAY, textFormat: { bold: true, fontSize: 9 }, horizontalAlignment: "CENTER" } },
+            fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
           },
         });
       });
       formatRequests.push(numberFormatRequest(demoSheetId, 2, 5, 1, 7, "#,##0"));
       formatRequests.push(numberFormatRequest(demoSheetId, 7, 10, 1, 7, "¥#,##0"));
       formatRequests.push(numberFormatRequest(demoSheetId, 12, 15, 1, 7, "¥#,##0"));
-      formatRequests.push(borderRequest(demoSheetId, 0, demographicRows.length, 0, 7));
-      formatRequests.push({
-        autoResizeDimensions: {
-          dimensions: { sheetId: demoSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 7 },
-        },
-      });
+      formatRequests.push(rightAlignRequest(demoSheetId, 2, 5, 1, 7));
+      formatRequests.push(rightAlignRequest(demoSheetId, 7, 10, 1, 7));
+      formatRequests.push(rightAlignRequest(demoSheetId, 12, 15, 1, 7));
+      formatRequests.push(borderRequest(demoSheetId, 0, 5, 0, 7));
+      formatRequests.push(borderRequest(demoSheetId, 5, 10, 0, 7));
+      formatRequests.push(borderRequest(demoSheetId, 10, 15, 0, 7));
+      formatRequests.push(colWidthRequest(demoSheetId, 0, 1, 80));
+      for (let c = 1; c < 7; c++) formatRequests.push(colWidthRequest(demoSheetId, c, c + 1, 85));
+      // Conditional formatting heatmaps
+      formatRequests.push(conditionalGradient(demoSheetId, 2, 5, 1, 7));
+      formatRequests.push(conditionalGradient(demoSheetId, 7, 10, 1, 7, true)); // CPA inverted
+      formatRequests.push(conditionalGradient(demoSheetId, 12, 15, 1, 7));
     }
 
-    // Hourly heatmap formatting
+    // ── 曜日×時間帯 ──
     const heatmapSheetId = sheetIdByName.get("曜日×時間帯");
     if (heatmapSheetId !== undefined) {
-      // Section headers
-      [0, 10, 20].forEach((rowIndex) => {
-        formatRequests.push(headerRequest(heatmapSheetId, rowIndex, 25));
-      });
-      // Sub-headers (hour labels)
-      [1, 11, 21].forEach((rowIndex) => {
+      [0, 10, 20].forEach((r) => formatRequests.push(headerRequest(heatmapSheetId, r, 25)));
+      [1, 11, 21].forEach((r) => {
         formatRequests.push({
           repeatCell: {
-            range: { sheetId: heatmapSheetId, startRowIndex: rowIndex, endRowIndex: rowIndex + 1, startColumnIndex: 0, endColumnIndex: 25 },
-            cell: { userEnteredFormat: { backgroundColor: LIGHT_GRAY, textFormat: { bold: true, fontSize: 9 } } },
-            fields: "userEnteredFormat(backgroundColor,textFormat)",
+            range: { sheetId: heatmapSheetId, startRowIndex: r, endRowIndex: r + 1, startColumnIndex: 0, endColumnIndex: 25 },
+            cell: { userEnteredFormat: { backgroundColor: LIGHT_GRAY, textFormat: { bold: true, fontSize: 9 }, horizontalAlignment: "CENTER" } },
+            fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
           },
         });
       });
       formatRequests.push(numberFormatRequest(heatmapSheetId, 2, 9, 1, 25, "#,##0"));
       formatRequests.push(numberFormatRequest(heatmapSheetId, 12, 19, 1, 25, "¥#,##0"));
       formatRequests.push(numberFormatRequest(heatmapSheetId, 22, 29, 1, 25, "¥#,##0"));
-      formatRequests.push(borderRequest(heatmapSheetId, 0, heatmapRows.length, 0, 25));
-      formatRequests.push({
-        autoResizeDimensions: {
-          dimensions: { sheetId: heatmapSheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 25 },
-        },
-      });
+      formatRequests.push(borderRequest(heatmapSheetId, 0, 9, 0, 25));
+      formatRequests.push(borderRequest(heatmapSheetId, 10, 19, 0, 25));
+      formatRequests.push(borderRequest(heatmapSheetId, 20, 29, 0, 25));
+      formatRequests.push(colWidthRequest(heatmapSheetId, 0, 1, 40));
+      for (let c = 1; c < 25; c++) formatRequests.push(colWidthRequest(heatmapSheetId, c, c + 1, 48));
+      // Conditional formatting heatmaps
+      formatRequests.push(conditionalGradient(heatmapSheetId, 2, 9, 1, 25));
+      formatRequests.push(conditionalGradient(heatmapSheetId, 12, 19, 1, 25, true)); // CPA inverted
+      formatRequests.push(conditionalGradient(heatmapSheetId, 22, 29, 1, 25));
     }
 
-    // broad numeric format catch-up for campaign/adset/creative detail tables
-    [
-      ["キャンペーン別", campaignRows],
-      ["広告セット別", adsetRows],
-      ["クリエイティブ別", creativeRows],
-    ].forEach(([name, rows]) => {
-      const sheetId = sheetIdByName.get(name as string);
-      if (sheetId === undefined) return;
-      const colCount = (rows as TableRows)[0]?.length ?? 1;
-      formatRequests.push(numberFormatRequest(sheetId, 1, (rows as TableRows).length, 0, colCount, "#,##0"));
-    });
+    // Campaign charts
+    if (campaignSheetId !== undefined) {
+      formatRequests.push(chartRequest(campaignSheetId, "キャンペーン別 消化額", "BAR",
+        { sheetId: campaignSheetId, startRowIndex: 1, endRowIndex: campaignRows.length, startColumnIndex: 1, endColumnIndex: 2 },
+        [{ sheetId: campaignSheetId, startRowIndex: 1, endRowIndex: campaignRows.length, startColumnIndex: 6, endColumnIndex: 7 }],
+        campaignRows.length + 2, 0, 600, 300));
+      formatRequests.push(chartRequest(campaignSheetId, "キャンペーン別 CV数", "BAR",
+        { sheetId: campaignSheetId, startRowIndex: 1, endRowIndex: campaignRows.length, startColumnIndex: 1, endColumnIndex: 2 },
+        [{ sheetId: campaignSheetId, startRowIndex: 1, endRowIndex: campaignRows.length, startColumnIndex: 8, endColumnIndex: 9 }],
+        campaignRows.length + 2, 7, 600, 300));
+    }
 
     await googleApiFetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
       accessToken,
-      {
-        requests: formatRequests,
-      },
+      { requests: formatRequests },
     );
 
     return NextResponse.json({

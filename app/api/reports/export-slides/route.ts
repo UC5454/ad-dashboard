@@ -41,7 +41,7 @@ function isValidPayload(body: unknown): body is ReportPayload {
 
 function runPythonScript(inputJson: string): Promise<ScriptResult> {
   return new Promise((resolve) => {
-    const scriptPath = join(process.cwd(), "scripts", "generate-slide-report.py");
+    const scriptPath = join(process.cwd(), "scripts", "generate-pptx-report.py");
 
     const child = execFile(
       "python3",

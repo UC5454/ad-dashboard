@@ -10,7 +10,7 @@ import {
   generateDailyAnalysis,
   generateOverallAnalysis,
 } from "@/lib/ai-analysis";
-import type { MetaAdInsights, MetaAdsetInsights, MetaCampaignInsights } from "@/types/meta";
+import type { MetaAdInsights, MetaAdsetInsights, MetaBreakdownInsights, MetaCampaignInsights } from "@/types/meta";
 
 interface MetaListResponse<T> {
   data?: T[];
@@ -172,7 +172,7 @@ export async function GET(request: NextRequest) {
       },
     ]);
 
-    const [projectCampaignRes, adsetRes, adRes, dailyRes] = (await Promise.all([
+    const [projectCampaignRes, adsetRes, adRes, dailyRes, deviceRes, demoRes, hourlyRes] = (await Promise.all([
       metaGet(
         `${accountId}/insights`,
         {
@@ -218,11 +218,50 @@ export async function GET(request: NextRequest) {
         },
         accessToken,
       ),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "impressions,clicks,spend,ctr,cpc,actions,date_start,date_stop",
+          level: "account",
+          date_preset: datePreset,
+          breakdowns: "impression_device",
+          filtering,
+          limit: "200",
+        },
+        accessToken,
+      ).catch(() => ({ data: [] })),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "impressions,clicks,spend,ctr,cpc,actions,date_start,date_stop",
+          level: "account",
+          date_preset: datePreset,
+          breakdowns: "age,gender",
+          filtering,
+          limit: "200",
+        },
+        accessToken,
+      ).catch(() => ({ data: [] })),
+      metaGet(
+        `${accountId}/insights`,
+        {
+          fields: "impressions,clicks,spend,ctr,cpc,actions,date_start,date_stop",
+          level: "account",
+          date_preset: datePreset,
+          breakdowns: "hourly_stats_aggregated_by_advertiser_time_zone",
+          filtering,
+          limit: "500",
+        },
+        accessToken,
+      ).catch(() => ({ data: [] })),
     ])) as [
       MetaListResponse<MetaCampaignInsights>,
       MetaListResponse<MetaAdsetInsights>,
       MetaListResponse<MetaAdInsights>,
       MetaListResponse<MetaCampaignInsights>,
+      MetaListResponse<MetaBreakdownInsights>,
+      MetaListResponse<MetaBreakdownInsights>,
+      MetaListResponse<MetaBreakdownInsights>,
     ];
 
     const campaigns: CampaignOutput[] = (projectCampaignRes.data || [])
@@ -364,6 +403,50 @@ export async function GET(request: NextRequest) {
     project.cpa = project.cv > 0 ? project.spend / project.cv : 0;
     project.ctr = project.impressions > 0 ? (project.clicks / project.impressions) * 100 : 0;
 
+    const deviceBreakdown = (deviceRes.data || []).map((row) => {
+      const spend = numeric(row.spend);
+      const impressions = numeric(row.impressions);
+      const clicks = numeric(row.clicks);
+      const cv = actionValue(row.actions, "offsite_conversion.fb_pixel_custom");
+      return {
+        device: row.impression_device || "unknown",
+        spend,
+        impressions,
+        clicks,
+        cv,
+        cpa: cv > 0 ? spend / cv : 0,
+        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+      };
+    });
+
+    const demographicBreakdown = (demoRes.data || []).map((row) => {
+      const spend = numeric(row.spend);
+      const impressions = numeric(row.impressions);
+      const clicks = numeric(row.clicks);
+      const cv = actionValue(row.actions, "offsite_conversion.fb_pixel_custom");
+      return {
+        age: row.age || "unknown",
+        gender: row.gender || "unknown",
+        spend,
+        impressions,
+        clicks,
+        cv,
+        cpa: cv > 0 ? spend / cv : 0,
+      };
+    });
+
+    const hourlyBreakdown = (hourlyRes.data || []).map((row) => {
+      const spend = numeric(row.spend);
+      const cv = actionValue(row.actions, "offsite_conversion.fb_pixel_custom");
+      return {
+        date_start: row.date_start,
+        hourly_stats_aggregated_by_advertiser_time_zone: row.hourly_stats_aggregated_by_advertiser_time_zone,
+        spend,
+        cv,
+        cpa: cv > 0 ? spend / cv : 0,
+      };
+    });
+
     const allProjects = groupCampaignsToProjects(allCampaigns).map((row) => ({
       name: row.name,
       spend: row.spend,
@@ -380,6 +463,9 @@ export async function GET(request: NextRequest) {
       adsets,
       creatives,
       daily,
+      deviceBreakdown,
+      demographicBreakdown,
+      hourlyBreakdown,
       analysis: {
         overall: generateOverallAnalysis(allProjects),
         daily: generateDailyAnalysis(

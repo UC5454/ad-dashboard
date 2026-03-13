@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import DemographicBreakdown from "@/components/dashboard/DemographicBreakdown";
+import DeviceBreakdown from "@/components/dashboard/DeviceBreakdown";
+import TimeHeatmap from "@/components/dashboard/TimeHeatmap";
 import { applyFee, calculateBudgetProgress } from "@/lib/budget";
 import { apiFetch } from "@/lib/api-client";
 import { DEFAULT_SETTINGS, loadSettings, type FeeCalcMethod } from "@/lib/settings";
@@ -86,12 +89,51 @@ interface DailyRow {
   cpa: number;
 }
 
+interface DeviceData {
+  device: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+  ctr: number;
+}
+
+interface DemoCell {
+  age: string;
+  gender: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+}
+
+interface HeatmapRawRow {
+  date_start: string;
+  hourly_stats_aggregated_by_advertiser_time_zone?: string;
+  spend: number;
+  cv: number;
+  cpa: number;
+}
+
+interface HeatmapCell {
+  day: number;
+  hour: number;
+  spend: number;
+  cv: number;
+  cpa: number;
+}
+
 interface ProjectDetailResponse {
   project: ProjectSummary;
   campaigns: CampaignRow[];
   adsets: AdsetRow[];
   creatives: CreativeRow[];
   daily: DailyRow[];
+  deviceBreakdown?: DeviceData[];
+  demographicBreakdown?: DemoCell[];
+  hourlyBreakdown?: HeatmapRawRow[];
   analysis: {
     overall: AnalysisResult;
     daily: AnalysisResult;
@@ -204,6 +246,24 @@ export default function ProjectDetailPage() {
       cpc: row.clicks > 0 ? row.spend / row.clicks : 0,
     }));
   }, [detail]);
+
+  const heatmapData = useMemo((): HeatmapCell[] => {
+    if (!detail?.hourlyBreakdown) return [];
+    const map = new Map<string, HeatmapCell>();
+    detail.hourlyBreakdown.forEach((row) => {
+      const rawDay = new Date(row.date_start).getDay();
+      const day = rawDay === 0 ? 6 : rawDay - 1; // Monday=0
+      const hourMatch = row.hourly_stats_aggregated_by_advertiser_time_zone?.match(/^(\d{2}):/);
+      const hour = hourMatch ? Number(hourMatch[1]) : 0;
+      const key = `${day}:${hour}`;
+      const current = map.get(key) ?? { day, hour, spend: 0, cv: 0, cpa: 0 };
+      current.spend += row.spend;
+      current.cv += row.cv;
+      current.cpa = current.cv > 0 ? current.spend / current.cv : 0;
+      map.set(key, current);
+    });
+    return Array.from(map.values());
+  }, [detail?.hourlyBreakdown]);
 
   if (loading) {
     return (
@@ -523,6 +583,13 @@ export default function ProjectDetailPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="space-y-6">
+        <h3 className="text-lg font-semibold text-[#1a365d]">詳細分析</h3>
+        <DeviceBreakdown data={detail.deviceBreakdown || []} />
+        <DemographicBreakdown data={detail.demographicBreakdown || []} />
+        <TimeHeatmap data={heatmapData} />
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">

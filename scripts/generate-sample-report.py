@@ -435,12 +435,21 @@ def main():
     fmt.append({"repeatCell":{"range":{"sheetId":cov,"startRowIndex":10,"endRowIndex":11,"startColumnIndex":0,"endColumnIndex":1},
         "cell":{"userEnteredFormat":{"textFormat":{"fontSize":16,"bold":True,"foregroundColor":{"red":0.75,"green":0.82,"blue":0.9}},"horizontalAlignment":"CENTER"}},
         "fields":"userEnteredFormat(textFormat,horizontalAlignment)"}})
-    # Period / date
+    # Period / date / company name
     for r in [12, 18, 21]:
         fmt.append({"mergeCells":{"range":{"sheetId":cov,"startRowIndex":r,"endRowIndex":r+1,"startColumnIndex":0,"endColumnIndex":8},"mergeType":"MERGE_ALL"}})
         fmt.append({"repeatCell":{"range":{"sheetId":cov,"startRowIndex":r,"endRowIndex":r+1,"startColumnIndex":0,"endColumnIndex":1},
-            "cell":{"userEnteredFormat":{"textFormat":{"fontSize":11,"foregroundColor":{"red":0.75,"green":0.82,"blue":0.9}},"horizontalAlignment":"CENTER"}},
-            "fields":"userEnteredFormat(textFormat,horizontalAlignment)"}})
+            "cell":{"userEnteredFormat":{"textFormat":{"fontSize":11,"foregroundColor":{"red":0.75,"green":0.82,"blue":0.9}},"horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE"}},
+            "fields":"userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)"}})
+    # Cover page row heights
+    fmt.append(row_height(cov, 7, 8, 50))   # client name
+    fmt.append(row_height(cov, 10, 11, 50))  # report title
+    fmt.append(row_height(cov, 12, 13, 35))  # period
+    fmt.append(row_height(cov, 18, 19, 35))  # date
+    fmt.append(row_height(cov, 21, 22, 35))  # company name
+    for r in [0,1,2,3,4,5,6,8,9,11,13,14,15,16,17,19,20]:
+        if r < len(cover):
+            fmt.append(row_height(cov, r, r+1, 20))  # spacer rows
     fmt.append(col_width(cov, 0, 8, 100))
 
     # ── サマリー ──
@@ -459,10 +468,17 @@ def main():
     fmt.append(brd(sm, 10, 18, 0, 3))
     fmt += alt_rows(sm, 3, 7, 3)
     fmt += alt_rows(sm, 11, 18, 3)
-    # Wrap for long text
+    # Wrap for long text + vertical alignment
     fmt.append({"repeatCell":{"range":{"sheetId":sm,"startRowIndex":19,"endRowIndex":len(summary),"startColumnIndex":0,"endColumnIndex":3},
-        "cell":{"userEnteredFormat":{"wrapStrategy":"WRAP"}},
-        "fields":"userEnteredFormat.wrapStrategy"}})
+        "cell":{"userEnteredFormat":{"wrapStrategy":"WRAP","verticalAlignment":"TOP"}},
+        "fields":"userEnteredFormat(wrapStrategy,verticalAlignment)"}})
+    # Row heights for summary text rows
+    for r in range(3, 7):
+        fmt.append(row_height(sm, r, r+1, 30))
+    for r in range(11, 18):
+        fmt.append(row_height(sm, r, r+1, 30))
+    for r in range(21, len(summary)):
+        fmt.append(row_height(sm, r, r+1, 40))  # wrapped text rows need more height
     fmt.append(col_width(sm, 0, 1, 200))
     fmt.append(col_width(sm, 1, 2, 160))
     fmt.append(col_width(sm, 2, 3, 160))
@@ -507,6 +523,10 @@ def main():
         fmt.append(right_align(_id, 1, len(data), num_start_col, cols))
         fmt += alt_rows(_id, 2, len(data), cols)
         fmt.append(freeze(_id, 1, 0))
+        # Vertical alignment MIDDLE for all data rows
+        fmt.append({"repeatCell":{"range":{"sheetId":_id,"startRowIndex":1,"endRowIndex":len(data),"startColumnIndex":0,"endColumnIndex":cols},
+            "cell":{"userEnteredFormat":{"verticalAlignment":"MIDDLE","padding":{"top":3,"bottom":3,"left":4,"right":4}}},
+            "fields":"userEnteredFormat(verticalAlignment,padding)"}})
         # Column widths
         fmt.append(col_width(_id, 0, 1, 40))  # No.
         for c in range(1, min(4, cols)):
@@ -579,6 +599,10 @@ def main():
             fmt.append({"repeatCell":{"range":{"sheetId":d_id,"startRowIndex":i,"endRowIndex":i+1,"startColumnIndex":0,"endColumnIndex":11},
                 "cell":{"userEnteredFormat":{"backgroundColor":WEEKEND_BG}},
                 "fields":"userEnteredFormat.backgroundColor"}})
+    # Vertical alignment MIDDLE for data rows
+    fmt.append({"repeatCell":{"range":{"sheetId":d_id,"startRowIndex":1,"endRowIndex":len(daily),"startColumnIndex":0,"endColumnIndex":11},
+        "cell":{"userEnteredFormat":{"verticalAlignment":"MIDDLE"}},
+        "fields":"userEnteredFormat.verticalAlignment"}})
     fmt.append(col_width(d_id, 0, 1, 100))
     fmt.append(col_width(d_id, 1, 2, 40))
     for c in range(2, 11):
@@ -598,6 +622,11 @@ def main():
         "fields":"userEnteredFormat(wrapStrategy,verticalAlignment)"}})
     fmt.append(col_width(ai_id, 0, 1, 140))
     fmt.append(col_width(ai_id, 1, 2, 550))
+    # Row heights for AI analysis content rows (rows with text content)
+    content_rows_ai = [2,3,4,5,6,8,9,10,13,14,16,17,18,20,21,22,24,25,26]
+    for r in content_rows_ai:
+        if r < len(ai):
+            fmt.append(row_height(ai_id, r, r+1, 40))
 
     # ── デバイス別 ──
     dv = sid_map["デバイス別"]
@@ -612,6 +641,10 @@ def main():
     fmt.append(nfmt(dv, 1, len(device), 6, 7, "#,##0"))
     fmt.append(nfmt(dv, 1, len(device), 7, 8, "¥#,##0"))
     fmt.append(nfmt(dv, 1, len(device), 8, 9, "0.0%"))
+    # Vertical alignment MIDDLE for data rows
+    fmt.append({"repeatCell":{"range":{"sheetId":dv,"startRowIndex":1,"endRowIndex":len(device),"startColumnIndex":0,"endColumnIndex":9},
+        "cell":{"userEnteredFormat":{"verticalAlignment":"MIDDLE"}},
+        "fields":"userEnteredFormat.verticalAlignment"}})
     fmt.append(col_width(dv, 0, 1, 140))
     for c in range(1, 9):
         fmt.append(col_width(dv, c, c+1, 100))
@@ -660,7 +693,12 @@ def main():
     fmt.append(brd(ht, 20, 29, 0, 25))
     fmt.append(col_width(ht, 0, 1, 40))
     for c in range(1, 25):
-        fmt.append(col_width(ht, c, c+1, 48))
+        fmt.append(col_width(ht, c, c+1, 50))
+    # Smaller font size for time labels to prevent truncation
+    for r in [1, 11, 21]:
+        fmt.append({"repeatCell":{"range":{"sheetId":ht,"startRowIndex":r,"endRowIndex":r+1,"startColumnIndex":1,"endColumnIndex":25},
+            "cell":{"userEnteredFormat":{"textFormat":{"fontSize":8}}},
+            "fields":"userEnteredFormat.textFormat.fontSize"}})
     # Conditional formatting
     fmt.append(conditional_gradient(ht, 2, 9, 1, 25))
     fmt.append({"addConditionalFormatRule":{"rule":{

@@ -428,6 +428,9 @@ export default function ReportsPage() {
           feeRate,
           feeCalcMethod: settings.feeCalcMethod,
           monthlyBudget: budgetProgress?.monthlyBudget ?? null,
+          deviceBreakdown: detail.deviceBreakdown ?? [],
+          demographicBreakdown: detail.demographicBreakdown ?? [],
+          hourlyBreakdown: detail.hourlyBreakdown ?? [],
         }),
       });
 

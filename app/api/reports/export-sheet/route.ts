@@ -930,9 +930,22 @@ function headerRequest(sheetId: number, rowIndex: number, colCount: number) {
         userEnteredFormat: {
           backgroundColor: NAVY,
           textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 }, fontSize: 10 },
+          horizontalAlignment: "CENTER",
+          verticalAlignment: "MIDDLE",
+          padding: { top: 4, bottom: 4, left: 6, right: 6 },
         },
       },
-      fields: "userEnteredFormat(backgroundColor,textFormat)",
+      fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,padding)",
+    },
+  };
+}
+
+function rowHeightRequest(sheetId: number, startRow: number, endRow: number, px: number) {
+  return {
+    updateDimensionProperties: {
+      range: { sheetId, dimension: "ROWS", startIndex: startRow, endIndex: endRow },
+      properties: { pixelSize: px },
+      fields: "pixelSize",
     },
   };
 }
@@ -1318,16 +1331,40 @@ export async function POST(request: NextRequest) {
           fields: "userEnteredFormat(backgroundColor,textFormat)",
         },
       });
+      // Client name merge + large font
       formatRequests.push({
         mergeCells: { range: { sheetId: coverSheetId, startRowIndex: 2, endRowIndex: 3, startColumnIndex: 0, endColumnIndex: 6 }, mergeType: "MERGE_ALL" },
       });
       formatRequests.push({
         repeatCell: {
           range: { sheetId: coverSheetId, startRowIndex: 2, endRowIndex: 3, startColumnIndex: 0, endColumnIndex: 1 },
-          cell: { userEnteredFormat: { textFormat: { fontSize: 22, bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, horizontalAlignment: "CENTER" } },
-          fields: "userEnteredFormat(textFormat,horizontalAlignment)",
+          cell: { userEnteredFormat: { textFormat: { fontSize: 22, bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE" } },
+          fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
         },
       });
+      // Period / date merges + center align
+      for (const r of [13, 19]) {
+        if (r < coverRows.length) {
+          formatRequests.push({
+            mergeCells: { range: { sheetId: coverSheetId, startRowIndex: r, endRowIndex: r + 1, startColumnIndex: 0, endColumnIndex: 8 }, mergeType: "MERGE_ALL" },
+          });
+          formatRequests.push({
+            repeatCell: {
+              range: { sheetId: coverSheetId, startRowIndex: r, endRowIndex: r + 1, startColumnIndex: 0, endColumnIndex: 1 },
+              cell: { userEnteredFormat: { textFormat: { fontSize: 11, foregroundColor: { red: 0.75, green: 0.82, blue: 0.9 } }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE" } },
+              fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+            },
+          });
+        }
+      }
+      // Cover page row heights
+      formatRequests.push(rowHeightRequest(coverSheetId, 2, 3, 50));   // client name
+      formatRequests.push(rowHeightRequest(coverSheetId, 13, 14, 35)); // period
+      formatRequests.push(rowHeightRequest(coverSheetId, 19, 20, 35)); // date
+      // Spacer rows
+      for (const r of [0,1,3,4,5,6,7,8,9,10,11,12,14,15,16,17,18]) {
+        if (r < coverRows.length) formatRequests.push(rowHeightRequest(coverSheetId, r, r + 1, 20));
+      }
       for (let c = 0; c < 8; c++) formatRequests.push(colWidthRequest(coverSheetId, c, c + 1, 100));
     }
 
@@ -1342,6 +1379,18 @@ export async function POST(request: NextRequest) {
       formatRequests.push(numberFormatRequest(summarySheetId, 8, 12, 1, 2, "¥#,##0"));
       formatRequests.push(...alternateRowRequests(summarySheetId, 3, 6, 6));
       formatRequests.push(...alternateRowRequests(summarySheetId, 8, 12, 6));
+      // Wrap + vertical alignment for summary comment section (rows 13+)
+      formatRequests.push({
+        repeatCell: {
+          range: { sheetId: summarySheetId, startRowIndex: 13, endRowIndex: se, startColumnIndex: 0, endColumnIndex: 6 },
+          cell: { userEnteredFormat: { wrapStrategy: "WRAP", verticalAlignment: "TOP" } },
+          fields: "userEnteredFormat(wrapStrategy,verticalAlignment)",
+        },
+      });
+      // Row heights for data rows
+      for (let r = 3; r < 6; r++) formatRequests.push(rowHeightRequest(summarySheetId, r, r + 1, 30));
+      for (let r = 8; r < 12; r++) formatRequests.push(rowHeightRequest(summarySheetId, r, r + 1, 30));
+      for (let r = 14; r < se; r++) formatRequests.push(rowHeightRequest(summarySheetId, r, r + 1, 40));
       formatRequests.push(colWidthRequest(summarySheetId, 0, 1, 180));
       formatRequests.push(colWidthRequest(summarySheetId, 1, 2, 140));
       formatRequests.push(colWidthRequest(summarySheetId, 2, 3, 140));
@@ -1377,6 +1426,14 @@ export async function POST(request: NextRequest) {
       formatRequests.push(rightAlignRequest(id, 1, rows.length, numStartCol, cols));
       formatRequests.push(...alternateRowRequests(id, 2, rows.length, cols));
       formatRequests.push(freezeRequest(id, 1));
+      // Vertical alignment MIDDLE + padding for data rows
+      formatRequests.push({
+        repeatCell: {
+          range: { sheetId: id, startRowIndex: 1, endRowIndex: rows.length, startColumnIndex: 0, endColumnIndex: cols },
+          cell: { userEnteredFormat: { verticalAlignment: "MIDDLE", padding: { top: 3, bottom: 3, left: 4, right: 4 } } },
+          fields: "userEnteredFormat(verticalAlignment,padding)",
+        },
+      });
       // Column widths: No. col narrow, name cols wide, number cols fixed
       formatRequests.push(colWidthRequest(id, 0, 1, 40));
       for (let c = 1; c < Math.min(numStartCol, cols); c++) formatRequests.push(colWidthRequest(id, c, c + 1, 170));
@@ -1477,6 +1534,14 @@ export async function POST(request: NextRequest) {
           });
         }
       }
+      // Vertical alignment MIDDLE for data rows
+      formatRequests.push({
+        repeatCell: {
+          range: { sheetId: dailySheetId, startRowIndex: 1, endRowIndex: dailyTrendRows.length, startColumnIndex: 0, endColumnIndex: 11 },
+          cell: { userEnteredFormat: { verticalAlignment: "MIDDLE" } },
+          fields: "userEnteredFormat.verticalAlignment",
+        },
+      });
       formatRequests.push(colWidthRequest(dailySheetId, 0, 1, 100));
       formatRequests.push(colWidthRequest(dailySheetId, 1, 2, 40));
       for (let c = 2; c < 11; c++) formatRequests.push(colWidthRequest(dailySheetId, c, c + 1, 95));
@@ -1506,6 +1571,10 @@ export async function POST(request: NextRequest) {
       });
       formatRequests.push(colWidthRequest(aiSheetId, 0, 1, 140));
       formatRequests.push(colWidthRequest(aiSheetId, 1, 2, 550));
+      // Row heights for AI analysis content rows
+      for (const r of [1, 2, 3, 6, 7, 10, 13]) {
+        if (r < aiRows.length) formatRequests.push(rowHeightRequest(aiSheetId, r, r + 1, 40));
+      }
     }
 
     // ── デバイス別 ──
@@ -1522,6 +1591,14 @@ export async function POST(request: NextRequest) {
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 6, 7, "#,##0"));
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 7, 8, "¥#,##0"));
       formatRequests.push(numberFormatRequest(deviceSheetId, 1, deviceRows.length, 8, 9, "0.0%"));
+      // Vertical alignment MIDDLE for data rows
+      formatRequests.push({
+        repeatCell: {
+          range: { sheetId: deviceSheetId, startRowIndex: 1, endRowIndex: deviceRows.length, startColumnIndex: 0, endColumnIndex: 9 },
+          cell: { userEnteredFormat: { verticalAlignment: "MIDDLE" } },
+          fields: "userEnteredFormat.verticalAlignment",
+        },
+      });
       formatRequests.push(colWidthRequest(deviceSheetId, 0, 1, 140));
       for (let c = 1; c < 9; c++) formatRequests.push(colWidthRequest(deviceSheetId, c, c + 1, 100));
       // Pie chart: spend share
@@ -1586,7 +1663,17 @@ export async function POST(request: NextRequest) {
       formatRequests.push(borderRequest(heatmapSheetId, 10, 19, 0, 25));
       formatRequests.push(borderRequest(heatmapSheetId, 20, 29, 0, 25));
       formatRequests.push(colWidthRequest(heatmapSheetId, 0, 1, 40));
-      for (let c = 1; c < 25; c++) formatRequests.push(colWidthRequest(heatmapSheetId, c, c + 1, 48));
+      for (let c = 1; c < 25; c++) formatRequests.push(colWidthRequest(heatmapSheetId, c, c + 1, 50));
+      // Smaller font size for time labels to prevent truncation
+      for (const r of [1, 11, 21]) {
+        formatRequests.push({
+          repeatCell: {
+            range: { sheetId: heatmapSheetId, startRowIndex: r, endRowIndex: r + 1, startColumnIndex: 1, endColumnIndex: 25 },
+            cell: { userEnteredFormat: { textFormat: { fontSize: 8 } } },
+            fields: "userEnteredFormat.textFormat.fontSize",
+          },
+        });
+      }
       // Conditional formatting heatmaps
       formatRequests.push(conditionalGradient(heatmapSheetId, 2, 9, 1, 25));
       formatRequests.push(conditionalGradient(heatmapSheetId, 12, 19, 1, 25, true)); // CPA inverted

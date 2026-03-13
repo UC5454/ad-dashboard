@@ -48,6 +48,34 @@ interface DailyRow {
   cpa: number;
 }
 
+interface DeviceRow {
+  device: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+  ctr: number;
+}
+
+interface DemographicRow {
+  age: string;
+  gender: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+}
+
+interface HourlyRow {
+  date_start: string;
+  hourly_stats_aggregated_by_advertiser_time_zone: string;
+  spend: number;
+  cv: number;
+  cpa: number;
+}
+
 interface AnalysisBlock {
   summary: string;
   insights: string[];
@@ -75,6 +103,9 @@ interface ReportData {
   feeRate: number;
   feeCalcMethod: "markup" | "margin";
   monthlyBudget: number | null;
+  deviceBreakdown?: DeviceRow[];
+  demographicBreakdown?: DemographicRow[];
+  hourlyBreakdown?: HourlyRow[];
 }
 
 interface SlidesCreatePresentationResponse {
@@ -771,6 +802,182 @@ function buildBatchRequests(
       color: BLUE,
     }),
   );
+
+  // --- デバイス別パフォーマンス ---
+  if (data.deviceBreakdown && data.deviceBreakdown.length > 0) {
+    const slideDevice = "slide_device_breakdown";
+    requests.push({
+      createSlide: {
+        objectId: slideDevice,
+        slideLayoutReference: { predefinedLayout: "BLANK" },
+      },
+    });
+
+    const totalDeviceSpend = data.deviceBreakdown.reduce((sum, r) => sum + r.spend, 0);
+    const deviceRows = data.deviceBreakdown.map((row) => {
+      const feeSpend = applyFee(row.spend, data.feeRate, data.feeCalcMethod);
+      const share = totalDeviceSpend > 0 ? (row.spend / totalDeviceSpend) * 100 : 0;
+      return [
+        row.device,
+        formatCurrency(feeSpend),
+        `${roundInt(row.cv).toLocaleString("ja-JP")}`,
+        row.cv > 0 ? formatCurrency(row.cpa) : "-",
+        formatPercent(share),
+      ];
+    });
+
+    requests.push(
+      ...createTextBoxRequests({
+        slideId: slideDevice,
+        objectId: "device_title",
+        text: "デバイス別パフォーマンス",
+        position: { x: 500000, y: 350000 },
+        size: { width: 5000000, height: 550000 },
+        fontSizePt: 24,
+        bold: true,
+        color: NAVY,
+      }),
+      ...createTableRequests({
+        slideId: slideDevice,
+        tableId: "device_table",
+        headers: ["デバイス", "消化額(Fee込)", "CV", "CPA", "構成比"],
+        rows: deviceRows,
+        position: { x: 500000, y: 1200000 },
+        size: { width: 9000000, height: 2800000 },
+      }),
+    );
+  }
+
+  // --- 属性別パフォーマンス (年齢×性別) ---
+  if (data.demographicBreakdown && data.demographicBreakdown.length > 0) {
+    const slideDemo = "slide_demo_breakdown";
+    requests.push({
+      createSlide: {
+        objectId: slideDemo,
+        slideLayoutReference: { predefinedLayout: "BLANK" },
+      },
+    });
+
+    requests.push(
+      ...createTextBoxRequests({
+        slideId: slideDemo,
+        objectId: "demo_title",
+        text: "属性別パフォーマンス",
+        position: { x: 500000, y: 350000 },
+        size: { width: 5000000, height: 550000 },
+        fontSizePt: 24,
+        bold: true,
+        color: NAVY,
+      }),
+    );
+
+    // Build age×gender CV matrix
+    const ageGroups = [...new Set(data.demographicBreakdown.map((r) => r.age))].sort();
+    const genders = [...new Set(data.demographicBreakdown.map((r) => r.gender))].sort();
+
+    const cvMap = new Map<string, number>();
+    for (const row of data.demographicBreakdown) {
+      const key = `${row.gender}|${row.age}`;
+      cvMap.set(key, (cvMap.get(key) ?? 0) + row.cv);
+    }
+
+    // Build as table: header = ["性別", ...ageGroups], rows per gender
+    const demoHeaders = ["性別", ...ageGroups];
+    const demoRows = genders.map((gender) => {
+      const cells = ageGroups.map((age) => {
+        const cv = cvMap.get(`${gender}|${age}`) ?? 0;
+        return `${roundInt(cv)}`;
+      });
+      return [gender, ...cells];
+    });
+
+    requests.push(
+      ...createTextBoxRequests({
+        slideId: slideDemo,
+        objectId: "demo_subtitle",
+        text: "年齢×性別 CV数マトリクス",
+        position: { x: 500000, y: 900000 },
+        size: { width: 5000000, height: 350000 },
+        fontSizePt: 14,
+        color: MID_GRAY,
+      }),
+      ...createTableRequests({
+        slideId: slideDemo,
+        tableId: "demo_table",
+        headers: demoHeaders,
+        rows: demoRows,
+        position: { x: 500000, y: 1400000 },
+        size: { width: 9000000, height: 2400000 },
+      }),
+    );
+  }
+
+  // --- 時間帯別配信分析 ---
+  if (data.hourlyBreakdown && data.hourlyBreakdown.length > 0) {
+    const slideHourly = "slide_hourly_breakdown";
+    requests.push({
+      createSlide: {
+        objectId: slideHourly,
+        slideLayoutReference: { predefinedLayout: "BLANK" },
+      },
+    });
+
+    // Aggregate CV by hour
+    const hourCvMap = new Map<string, number>();
+    for (const row of data.hourlyBreakdown) {
+      const hour = row.hourly_stats_aggregated_by_advertiser_time_zone ?? "00";
+      hourCvMap.set(hour, (hourCvMap.get(hour) ?? 0) + row.cv);
+    }
+
+    const hourEntries = [...hourCvMap.entries()].sort((a, b) => b[1] - a[1]);
+    const bestHours = hourEntries.filter((e) => e[1] > 0).slice(0, 3);
+    const worstHours = [...hourCvMap.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 3);
+
+    const bestText = bestHours.length > 0
+      ? bestHours.map((e) => `${e[0]}時 (CV: ${roundInt(e[1])}件)`).join("、")
+      : "データなし";
+    const worstText = worstHours.length > 0
+      ? worstHours.map((e) => `${e[0]}時 (CV: ${roundInt(e[1])}件)`).join("、")
+      : "データなし";
+
+    const totalHourlyCv = [...hourCvMap.values()].reduce((s, v) => s + v, 0);
+
+    const hourlyBodyText = [
+      `■ 時間帯別CV分析（全${hourCvMap.size}時間帯）`,
+      "",
+      `合計CV: ${roundInt(totalHourlyCv)}件`,
+      "",
+      `【CV獲得が多い時間帯 TOP3】`,
+      bestText,
+      "",
+      `【CV獲得が少ない時間帯 BOTTOM3】`,
+      worstText,
+    ].join("\n");
+
+    requests.push(
+      ...createTextBoxRequests({
+        slideId: slideHourly,
+        objectId: "hourly_title",
+        text: "時間帯別配信分析",
+        position: { x: 500000, y: 350000 },
+        size: { width: 5000000, height: 550000 },
+        fontSizePt: 24,
+        bold: true,
+        color: NAVY,
+      }),
+      ...createTextBoxRequests({
+        slideId: slideHourly,
+        objectId: "hourly_body",
+        text: hourlyBodyText,
+        position: { x: 500000, y: 1200000 },
+        size: { width: 9100000, height: 3500000 },
+        fontSizePt: 14,
+        color: NAVY,
+      }),
+    );
+  }
 
   return requests;
 }

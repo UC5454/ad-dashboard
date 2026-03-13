@@ -1,273 +1,301 @@
-# セキュリティ修正 + 品質改善 + 機能追加
+# ダッシュボード改修: レポート要件完全準拠（Phase 1-4）
 
 全て実装してください。確認や質問は不要です。
+具体的な提案・修正案・コード例まで自主的に出力してください。
 完了後 npm run build で成功することを確認してください。
 
 ## 絶対に変更しないファイル
-- `app/api/auth/[...nextauth]/route.ts`
 - `lib/auth.ts`
 - `middleware.ts`
-- `components/ui/Sidebar.tsx`
-- `components/settings/SettingsPageContent.tsx`
+- `lib/meta-api.ts`（既存の関数は変更しない。新規export追加はOK）
+- `next.config.ts`
+- `package.json`（依存関係追加不要。recharts 3は既にある）
 
 ## 技術スタック
-- Next.js 16.1.6, React 19, TypeScript strict
-- Tailwind CSS 4
-- 日本語UI統一
+- Next.js 16.1.6 + React 19 + TypeScript
+- Tailwind CSS 4（`@import "tailwindcss"` 方式、`tailwind.config.js`なし）
+- Recharts 3（`recharts@^3.1.0`）
+- 全コンポーネントは `"use client"` を先頭に記載
+- 色: navyは `text-[#1a365d]`、blueは `bg-[#2C5282]`、blue-lightは `hover:bg-[#3B6BA5]`
+- `@/` エイリアスを使う（例: `import { type TrendRow } from "@/components/dashboard/types"`）
 
 ---
 
-## タスク1: check-env APIルートに認証追加【セキュリティ/HIGH】
+## 1. KPI全体サマリー拡張（BigKpiCards + dashboard/page.tsx）
 
-### ファイル: `app/api/meta/check-env/route.ts`
-
-現在、認証チェックが一切ない。`auth()` でセッションを検証する:
-
+### 1-1. KpiMetric型の拡張
+- ファイル: `components/dashboard/types.ts`
+- 現状: KpiMetricは `label, value, previous, type, inverted?, subLabel?` のみ
+- 変更: type に `"percent"` を追加、`target?: number` を追加
 ```typescript
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-
-export async function GET() {
-  const session = await auth();
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const hasToken = !!process.env.META_ACCESS_TOKEN;
-  return NextResponse.json({ configured: hasToken });
+export interface KpiMetric {
+  label: string;
+  value: number;
+  previous: number;
+  type: "currency" | "number" | "roas" | "percent";
+  inverted?: boolean;
+  subLabel?: string;
+  target?: number;
 }
 ```
 
----
+### 1-2. BigKpiCardsに追加指標を表示
+- ファイル: `components/dashboard/BigKpiCards.tsx`
+- 変更:
+  - `formatValue`: `type: "percent"` の場合 `${value.toFixed(1)}%` でフォーマット
+  - `target` がある場合、前月比の下に `目標対比: {((value/target)*100).toFixed(1)}%` を小さく表示（`text-xs text-gray-500`）
 
-## タスク2: エラーメッセージの情報漏洩防止【セキュリティ/HIGH】
+### 1-3. dashboard/page.tsxのmetrics配列を8つに拡張
+- ファイル: `app/dashboard/page.tsx`
+- 現状: metricsは4つ（totalSpend, totalCv, avgCpa, avgRoas）
+- 変更: 以下8つに拡張。既存4つの後に4つ追加
+  - 表示回数（totalImpressions = projects.reduce impressions, type: "number"）
+  - クリック数（totalClicks = projects.reduce clicks, type: "number"）
+  - CTR（totalCtr = totalImpressions > 0 ? (totalClicks/totalImpressions)*100 : 0, type: "percent"）
+  - CPC（avgCpc = totalClicks > 0 ? totalSpend/totalClicks : 0, type: "currency", inverted: true）
+- prevRowsからも同様にprev値を計算（prevImpressions, prevClicks, prevCtr, prevCpc）
+- daily配列の各rowには既に `impressions` と `clicks` がある（MetaInsights extend）
 
-### ファイル: `app/api/reports/export-slides/route.ts`
-
-現在、Google Slides API のエラーレスポンスをそのままクライアントに返している（788行目、802行目）。
-
-#### 変更: `slidesFetch` 関数（788行目付近）
+### 1-4. TrendRow型にimpressions, clicks, ctrを追加
+- ファイル: `components/dashboard/types.ts`
 ```typescript
-// 変更前:
-throw new Error(`Slides API error (${response.status}): ${text}`);
-
-// 変更後:
-console.error(`Slides API error (${response.status}):`, text);
-throw new Error(`スライドの作成中にエラーが発生しました（${response.status}）`);
+export interface TrendRow {
+  date: string;
+  spend: number;
+  cv: number;
+  cpa: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+}
 ```
-
-#### 変更: `slidesGetFetch` 関数（802行目付近）
-```typescript
-// 変更前:
-throw new Error(`Slides API error (${response.status}): ${text}`);
-
-// 変更後:
-console.error(`Slides API GET error (${response.status}):`, text);
-throw new Error(`スライドデータの取得中にエラーが発生しました（${response.status}）`);
-```
-
-### ファイル: `app/api/reports/export-sheet/route.ts`
-
-同様に、Sheets API のエラーレスポンスにも同じ処理を適用する。`throw new Error` でAPIレスポンスのテキストをそのまま含めている箇所を全て修正:
-
-```typescript
-// 変更前:
-throw new Error(`Sheets API error (${response.status}): ${text}`);
-
-// 変更後:
-console.error(`Sheets API error (${response.status}):`, text);
-throw new Error(`シートの作成中にエラーが発生しました（${response.status}）`);
-```
+- `app/dashboard/page.tsx` の `trendRows` useMemo内でも impressions, clicks, ctr をマッピング
 
 ---
 
-## タスク3: applyFee 関数の重複排除【コード品質】
+## 2. トレンドチャート拡張 + デバイス別分析
 
-### 問題
-`applyFee` が3箇所に定義されている:
-- `lib/budget.ts` (正規版)
-- `app/api/reports/export-sheet/route.ts` (重複)
-- `app/api/reports/export-slides/route.ts` (重複)
-
-### 修正
-
-#### ファイル: `app/api/reports/export-sheet/route.ts`
-1. ファイル内の `function applyFee(...)` 定義を**削除**
-2. 先頭のimportに追加: `import { applyFee } from "@/lib/budget";`
-3. `applyFee` の呼び出し箇所はそのままでOK（シグネチャ互換）
-
-#### ファイル: `app/api/reports/export-slides/route.ts`
-1. ファイル内の `function applyFee(...)` 定義を**削除**
-2. 先頭のimportに追加: `import { applyFee } from "@/lib/budget";`
-3. `applyFee` の呼び出し箇所はそのままでOK
-
----
-
-## タスク4: CSV BOM追加（Excel日本語文字化け対策）【機能改善】
-
-### ファイル: `app/dashboard/reports/page.tsx`
-
-`downloadCSV` 関数（107行目付近）で、Blobの先頭にUTF-8 BOMを追加する:
-
+### 2-1. DailyTrendChartにimpressions/clicks/ctrタブ + 週別切替を追加
+- ファイル: `components/dashboard/DailyTrendChart.tsx`
+- 変更:
+  - MetricTab拡張: `type MetricTab = "spend" | "cv" | "cpa" | "impressions" | "clicks" | "ctr";`
+  - `granularity` state追加: `"daily" | "weekly"`
+  - 「日別/週別」トグルボタンをタイトル右側に追加
+  - 週別の場合は内部でrowsを週ごとにreduce:
 ```typescript
-// 変更前:
-function downloadCSV(filename: string, rows: string[][]) {
-  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-
-// 変更後:
-function downloadCSV(filename: string, rows: string[][]) {
-  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+function aggregateWeekly(rows: TrendRow[]): TrendRow[] {
+  const weeks = new Map<string, { spend: number; cv: number; impressions: number; clicks: number }>();
+  rows.forEach(row => {
+    const d = new Date(row.date);
+    const weekStart = new Date(d);
+    weekStart.setDate(d.getDate() - d.getDay());
+    const key = weekStart.toISOString().slice(0, 10);
+    const existing = weeks.get(key) || { spend: 0, cv: 0, impressions: 0, clicks: 0 };
+    existing.spend += row.spend;
+    existing.cv += row.cv;
+    existing.impressions += row.impressions;
+    existing.clicks += row.clicks;
+    weeks.set(key, existing);
+  });
+  return Array.from(weeks.entries()).map(([date, d]) => ({
+    date,
+    spend: d.spend,
+    cv: d.cv,
+    cpa: d.cv > 0 ? d.spend / d.cv : 0,
+    impressions: d.impressions,
+    clicks: d.clicks,
+    ctr: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0,
+  })).sort((a, b) => a.date.localeCompare(b.date));
+}
 ```
+  - ctrタブ: YAxis tickFormatter を `${value.toFixed(1)}%` に
+  - impressions/clicksタブ: 通貨フォーマットではなく `Math.round(value).toLocaleString("ja-JP")`
+  - タブボタンは横スクロール可能な `flex gap-0.5 overflow-x-auto` で配置
+
+### 2-2. 新規コンポーネント: DeviceBreakdown.tsx
+- ファイル: `components/dashboard/DeviceBreakdown.tsx`（新規作成）
+- 目的: デバイス別の費用比率（PieChart）+ CPA比較（BarChart）
+- props:
+```typescript
+interface DeviceData {
+  device: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+  ctr: number;
+}
+export default function DeviceBreakdown({ data }: { data: DeviceData[] })
+```
+- レイアウト:
+  - セクションタイトル: `デバイス別分析`
+  - 左半分: PieChart（費用比率）- `PieChart`, `Pie`, `Cell`, `Legend`, `Tooltip`
+  - 右半分: BarChart（CPA比較）- 横棒グラフ `BarChart` layout="vertical"
+  - sm以下は縦並び（`grid grid-cols-1 md:grid-cols-2 gap-4`）
+  - 色配列: `["#2C5282", "#38A169", "#D69E2E", "#E53E3E", "#805AD5"]`
+  - データが空の場合: `データがありません` メッセージ
+
+### 2-3. dashboard/page.tsxにDeviceBreakdownを追加
+- deviceData state追加
+- useEffect内のPromise.allに `apiFetch(\`/api/meta/breakdowns?dimension=impression_device&date_preset=\${datePreset}\`)` を追加
+- レスポンスをDeviceData[]に変換:
+```typescript
+const deviceNormalized = (deviceRaw as any[]).map(row => ({
+  device: row.impression_device || "unknown",
+  spend: Number(row.spend) || 0,
+  impressions: Number(row.impressions) || 0,
+  clicks: Number(row.clicks) || 0,
+  cv: row.cv || 0,
+  cpa: row.cpa || 0,
+  ctr: Number(row.ctr) || 0,
+}));
+```
+- DailyTrendChartの下に `<DeviceBreakdown data={deviceData} />` を配置
 
 ---
 
-## タスク5: PDF複数ページ対応【機能改善】
+## 3. キャンペーン別サマリー（CampaignSummaryTable）
 
-### ファイル: `app/dashboard/reports/page.tsx`
-
-PDF出力が1ページしか対応していない（251行目付近）。A4サイズを超えるコンテンツを複数ページに分割する:
-
+### 3-1. 新規コンポーネント: CampaignSummaryTable.tsx
+- ファイル: `components/dashboard/CampaignSummaryTable.tsx`（新規作成）
+- props:
 ```typescript
-// 変更前:
-const canvas = await html2canvasFn(preview, { scale: 2 });
-const imageData = canvas.toDataURL("image/png");
-const pdf = new jsPDFCtor("p", "mm", "a4");
-const width = pdf.internal.pageSize.getWidth();
-const height = (canvas.height * width) / canvas.width;
-
-pdf.addImage(imageData, "PNG", 0, 0, width, height);
-pdf.save(`project_report_${datePreset}_${selectedProjectId}.pdf`);
-
-// 変更後:
-const canvas = await html2canvasFn(preview, { scale: 2 });
-const imageData = canvas.toDataURL("image/png");
-const pdf = new jsPDFCtor("p", "mm", "a4");
-const pageWidth = pdf.internal.pageSize.getWidth();
-const pageHeight = pdf.internal.pageSize.getHeight();
-const imgHeight = (canvas.height * pageWidth) / canvas.width;
-
-let heightLeft = imgHeight;
-let position = 0;
-
-pdf.addImage(imageData, "PNG", 0, position, pageWidth, imgHeight);
-heightLeft -= pageHeight;
-
-while (heightLeft > 0) {
-  position -= pageHeight;
-  pdf.addPage();
-  pdf.addImage(imageData, "PNG", 0, position, pageWidth, imgHeight);
-  heightLeft -= pageHeight;
+interface CampaignSummaryData {
+  campaign_id: string;
+  campaign_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
+  spendShare: number;
 }
 
-pdf.save(`project_report_${datePreset}_${selectedProjectId}.pdf`);
+interface CampaignSummaryTableProps {
+  campaigns: CampaignSummaryData[];
+  targetCpa?: number;
+}
 ```
+- UI:
+  - タイトル: `キャンペーン別実績（TOP10）`
+  - ソートボタン: 費用順 / CV順
+  - テーブル列: キャンペーン名 | 消化額 | 費用シェア（横棒バー+%） | IMP | クリック | CTR | CV | CPA | CVR
+  - CPA色分け: targetCpaあり → CPA ≤ targetCpa は `text-[#2C5282]`、超過は `text-red-600`
+  - 費用シェアバー: `<div className="h-2 rounded-full bg-gray-100"><div className="h-full bg-[#2C5282] rounded-full" style={{width: `${share}%`}} /></div>`
+  - レスポンシブ: overflow-x-auto
+
+### 3-2. dashboard/page.tsxにキャンペーンデータ取得・表示追加
+- campaignsData state追加
+- useEffect内で `/api/meta/campaigns?date_preset=${datePreset}` をfetch
+- spendShareを計算し、TOP10にslice
+- ClientTableの下に配置
 
 ---
 
-## タスク6: レポートUIにCVR（獲得率）列を追加【機能追加】
+## 4. 詳細ドリルダウン: 属性別 + 時間帯ヒートマップ
 
-### ファイル: `app/dashboard/reports/page.tsx`
+### 4-1. breakdowns APIの拡張
+- ファイル: `app/api/meta/breakdowns/route.ts`
+- ALLOWED_BREAKDOWNSに追加:
+```typescript
+const ALLOWED_BREAKDOWNS = new Set([
+  "age",
+  "gender",
+  "country",
+  "publisher_platform",
+  "platform_position",
+  "impression_device",
+  "age,gender",
+  "region",
+  "hourly_stats_aggregated_by_advertiser_time_zone",
+]);
+```
+- MetaBreakdownInsightsに追加（types/meta.ts）:
+```typescript
+export interface MetaBreakdownInsights extends MetaInsights {
+  // 既存fields...
+  region?: string;
+  hourly_stats_aggregated_by_advertiser_time_zone?: string;
+}
+```
 
-レポートプレビュー内のキャンペーン別テーブルとクリエイティブ別テーブルにCVR列を追加する。
+### 4-2. 新規コンポーネント: DemographicBreakdown.tsx
+- ファイル: `components/dashboard/DemographicBreakdown.tsx`（新規作成）
+- props:
+```typescript
+interface DemoCell {
+  age: string;
+  gender: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+}
+export default function DemographicBreakdown({ data }: { data: DemoCell[] })
+```
+- レイアウト:
+  - タイトル: `年齢×性別分析`
+  - タブ: 「CV数」「CPA」「費用」切替
+  - テーブル: 行=年齢帯（18-24, 25-34, 35-44, 45-54, 55-64, 65+）、列=性別（male, female, unknown）
+  - ヒートマップ色:
+    - CV/費用: min-max正規化 → `rgba(44, 82, 130, ${0.1 + 0.8 * normalized})`
+    - CPA: 低い=緑系 `rgba(56, 161, 105, ...)` 高い=赤系 `rgba(229, 62, 62, ...)`
+  - セルにホバーでツールチップ（title属性でOK: `CV: X, CPA: ¥Y, 費用: ¥Z`）
+  - データが空の場合: メッセージ表示
 
-#### 変更1: キャンペーン別テーブルのヘッダーにCVR追加
-キャンペーン別のテーブルヘッダー（`<th>`タグの並び）の「CPA」の後に「CVR」を追加:
+### 4-3. 新規コンポーネント: TimeHeatmap.tsx
+- ファイル: `components/dashboard/TimeHeatmap.tsx`（新規作成）
+- props:
+```typescript
+interface HeatmapCell {
+  day: number;  // 0=月, 1=火, ..., 6=日
+  hour: number; // 0-23
+  spend: number;
+  cv: number;
+  cpa: number;
+}
+export default function TimeHeatmap({ data }: { data: HeatmapCell[] })
+```
+- レイアウト:
+  - タイトル: `曜日×時間帯分析`
+  - タブ: 「CV数」「CPA」「消化額」
+  - 7行×24列のグリッド
+  - 曜日ラベル（縦）: `["月", "火", "水", "木", "金", "土", "日"]`
+  - 時間ラベル（横）: `0, 1, 2, ... 23`（3時間おきに表示: 0, 3, 6, 9, 12, 15, 18, 21）
+  - セル: `w-5 h-5 sm:w-6 sm:h-6` の正方形、rounded-sm
+  - 色: DemographicBreakdownと同じヒートマップロジック
+  - ホバー: title属性 `{曜日} {hour}時 | CV: {cv}, CPA: ¥{cpa}, 費用: ¥{spend}`
+  - overflow-x-auto でスマホ対応
+
+### 4-4. dashboard/page.tsxにドリルダウンセクション追加
+- demographicData, heatmapData のstate追加
+- useEffect内で並行fetch:
+  - `/api/meta/breakdowns?dimension=age,gender&date_preset=${datePreset}` → DemoCell[]に変換
+  - `/api/meta/breakdowns?dimension=hourly_stats_aggregated_by_advertiser_time_zone&date_preset=${datePreset}` → HeatmapCell[]に変換
+    - hourly breakdownのレスポンスから時間帯を抽出（`"00:00:00 - 00:59:59"` → hour: 0）
+    - date_startから曜日を算出（`new Date(date_start).getDay()`、0=日→6に変換して月=0始まりにする）
+    - 同じ(day, hour)の行をreduce（spend/cv/cpa合計）
+- DeviceBreakdownの下にセクション追加:
 ```tsx
-<th>CVR</th>
+<section className="space-y-6">
+  <h3 className="text-lg font-semibold text-[#1a365d]">詳細分析</h3>
+  <DemographicBreakdown data={demographicData} />
+  <TimeHeatmap data={heatmapData} />
+</section>
 ```
-
-#### 変更2: キャンペーン別テーブルの各行にCVR値を表示
-CPAのセルの後に:
-```tsx
-<td>{row.clicks > 0 ? ((row.cv / row.clicks) * 100).toFixed(2) + "%" : "-"}</td>
-```
-
-#### 変更3: クリエイティブ別テーブルにも同様にCVR列を追加
-ヘッダーとデータ行の両方にCVRを追加する。
-
-#### 変更4: CSV出力にもCVR列を追加
-`onDownloadCsv` 関数のヘッダー行とデータ行に「CVR」を追加:
-- ヘッダー: `"CVR"` を `"CPA"` の後に追加
-- データ: `row.clicks > 0 ? ((row.cv / row.clicks) * 100).toFixed(2) : "0"` を追加
-
----
-
-## タスク7: レポートのfetchをapiFetchに統一【セキュリティ】
-
-### ファイル: `app/dashboard/reports/page.tsx`
-
-レポートページで `fetch("/api/reports/export-sheet", ...)` と `fetch("/api/reports/export-slides", ...)` を使っている箇所を全て `apiFetch` に変更する。
-
-1. importに追加: `import { apiFetch } from "@/lib/api-client";`
-2. `fetch("/api/reports/export-sheet"` → `apiFetch("/api/reports/export-sheet"`
-3. `fetch("/api/reports/export-slides"` → `apiFetch("/api/reports/export-slides"`
-4. `fetch("/api/meta/` → `apiFetch("/api/meta/` （もし直接fetchしている箇所があれば）
-
-※ `apiFetch` は `lib/api-client.ts` に既に存在する。Meta APIヘッダーを自動付与する関数。
-
----
-
-## タスク8: ROAS指標をレポートに追加【機能追加】
-
-### 概要
-ROAS（Return on Ad Spend）= 売上 / 広告費 × 100(%)
-現在のMeta APIレスポンスに `purchase_roas` が含まれる場合はそれを使用し、含まれない場合は「-」表示する。
-
-### ファイル: `app/api/reports/export-sheet/route.ts`
-
-#### 変更1: サマリーシートにROAS行を追加
-KPI一覧にROASを追加（CVの下、またはCPAの下に配置）:
-```
-ROAS | {roas値}x（購入ROASがある場合。ない場合は「-」）
-```
-
-※ roas値は `body.summary` に `purchase_roas` フィールドがある場合のみ。なければスキップ。
-
-#### 変更2: キャンペーン別シートにROAS列を追加
-ヘッダー行の最後（ランクの前）に「ROAS」列を追加。
-各行の値は `campaign.purchase_roas` があればそれ、なければ「-」。
-
-### ファイル: `app/api/reports/export-slides/route.ts`
-
-KPIサマリースライドにROASボックスを追加（空きがあれば）。purchase_roasがない場合はスキップ。
-
-### ファイル: `app/dashboard/reports/page.tsx`
-
-レポートプレビューのサマリー部分にROASを表示。`detail.summary` に `purchase_roas` があれば表示。
-
-**注意**: `purchase_roas` は Meta API の既存レスポンスに含まれている可能性がある。含まれていない場合は、インターフェースにOptionalフィールドとして追加し、UIでは「-」表示する。各種interfaceに `purchase_roas?: number | null;` を追加すること。
-
----
-
-## タスク9: export-sheetのクリエイティブ別シートに画像列を追加【機能追加】
-
-**注意**: CODEX-TASK.mdの前回タスク（クリエイティブ画像追加）が未完了の場合のみ実施。既に画像列が実装されている場合はスキップ。
-
-### ファイル: `app/api/reports/export-sheet/route.ts`
-
-#### 確認
-CreativeRow インターフェースに `image_url` / `thumbnail_url` が既にあるか確認。
-なければ追加:
-```typescript
-interface CreativeRow {
-  // 既存フィールド...
-  image_url?: string | null;
-  thumbnail_url?: string | null;
-}
-```
-
-クリエイティブ別シートのヘッダーに「画像」列が既にあるか確認。
-なければ、No.の次に追加し、`=IMAGE("url")` 関数でサムネイルを表示する。
 
 ---
 
 ## 実装上の注意
 
-- **`npm run build` が成功すること**を最優先で確認
-- TypeScript strict: 型エラーなし
-- 全て日本語UI
-- `lib/budget.ts` の `applyFee` はexport済み。型 `FeeCalcMethod = "markup" | "margin"` も同ファイルからexport
-- エラーメッセージは日本語で統一（「サーバーエラーが発生しました」等）
-- セキュリティ修正はサーバーログ（`console.error`）にだけ詳細を出し、クライアントには汎用メッセージを返す
-- 既存の認証フロー（NextAuth + Google OAuth + middleware.ts）を壊さないこと
+1. **既存コンポーネントの破壊的変更禁止**: BigKpiCards, DailyTrendChart, ClientTableは拡張する形で
+2. **型安全**: `any` は使わない。全ての新規コードにTypeScript型を付ける。ただしAPI responseの変換時のみ `as` キャスト許可
+3. **レスポンシブ**: 全コンポーネントがモバイル（375px幅）で崩れないこと
+4. **"use client"**: 新規コンポーネントの先頭に必ず記載
+5. **Recharts 3**: v3のAPIを使う。`ResponsiveContainer`, `PieChart`, `Pie`, `Cell`, `BarChart`, `Bar` 等
+6. **エラーハンドリング**: API fetchが失敗した場合は空配列をセットし、UIにはデータなしメッセージを表示。console.errorでログは出す
+7. **TrendRow型変更の影響**: DailyTrendChartのprops型が変わるので、page.tsxのtrendRowsマッピングも必ず更新すること
+8. **breakdowns APIのレスポンス**: normalizedオブジェクトに `cv` と `cpa` が含まれる（route.ts内で計算済み）

@@ -4,9 +4,10 @@ export interface KpiMetric {
   label: string;
   value: number;
   previous: number;
-  type: "currency" | "number" | "roas";
+  type: "currency" | "number" | "roas" | "percent";
   inverted?: boolean;
   subLabel?: string;
+  target?: number;
 }
 
 export interface ClientRow {
@@ -29,6 +30,9 @@ export interface TrendRow {
   spend: number;
   cv: number;
   cpa: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
 }
 
 export interface AlertItem {

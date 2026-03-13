@@ -56,6 +56,8 @@ export interface MetaBreakdownInsights extends MetaInsights {
   publisher_platform?: string;
   platform_position?: string;
   impression_device?: string;
+  region?: string;
+  hourly_stats_aggregated_by_advertiser_time_zone?: string;
 }
 
 export interface MetaCreativeSummary {

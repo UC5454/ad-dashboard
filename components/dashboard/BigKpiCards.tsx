@@ -1,3 +1,5 @@
+"use client";
+
 import { type KpiMetric } from "@/components/dashboard/types";
 
 function formatCurrency(value: number): string {
@@ -7,6 +9,7 @@ function formatCurrency(value: number): string {
 function formatValue(metric: KpiMetric): string {
   if (metric.type === "currency") return formatCurrency(metric.value);
   if (metric.type === "roas") return `${metric.value.toFixed(2)}x`;
+  if (metric.type === "percent") return `${metric.value.toFixed(1)}%`;
   return Math.round(metric.value).toLocaleString("ja-JP");
 }
 
@@ -30,6 +33,11 @@ export default function BigKpiCards({ metrics }: { metrics: KpiMetric[] }) {
             <p className={`mt-2 text-xs font-medium ${change.positive ? "text-emerald-600" : "text-red-600"}`}>
               {change.value}
             </p>
+            {metric.target !== undefined && metric.target > 0 && (
+              <p className="mt-1 text-xs text-gray-500">
+                目標対比: {((metric.value / metric.target) * 100).toFixed(1)}%
+              </p>
+            )}
           </article>
         );
       })}

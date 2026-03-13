@@ -2,17 +2,21 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import AlertBanner from "@/components/dashboard/AlertBanner";
 import BigKpiCards from "@/components/dashboard/BigKpiCards";
+import CampaignSummaryTable from "@/components/dashboard/CampaignSummaryTable";
 import ClientTable from "@/components/dashboard/ClientTable";
 import DailyTrendChart from "@/components/dashboard/DailyTrendChart";
-import AlertBanner from "@/components/dashboard/AlertBanner";
+import DemographicBreakdown from "@/components/dashboard/DemographicBreakdown";
+import DeviceBreakdown from "@/components/dashboard/DeviceBreakdown";
+import TimeHeatmap from "@/components/dashboard/TimeHeatmap";
 import type { AlertItem, ClientRow, KpiMetric, TrendRow } from "@/components/dashboard/types";
-import { calculateBudgetProgress } from "@/lib/budget";
 import { generateAlerts } from "@/lib/alerts";
 import { apiFetch } from "@/lib/api-client";
+import { calculateBudgetProgress } from "@/lib/budget";
 import { DEFAULT_SETTINGS, loadSettings, type FeeCalcMethod } from "@/lib/settings";
 import { loadApiKeys, loadCompanies } from "@/lib/storage";
-import type { MetaCreativeSummary, MetaInsights } from "@/types/meta";
+import type { MetaBreakdownInsights, MetaCreativeSummary, MetaInsights } from "@/types/meta";
 
 type Period = "current_month" | "last_30";
 
@@ -29,6 +33,58 @@ interface ProjectRow {
 
 interface DailyRow extends MetaInsights {
   cv?: number;
+}
+
+interface CampaignApiRow extends MetaInsights {
+  campaign_id: string;
+  campaign_name: string;
+  cv?: number;
+  cpa?: number;
+}
+
+interface DeviceData {
+  device: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+  ctr: number;
+}
+
+interface CampaignSummaryData {
+  campaign_id: string;
+  campaign_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  cv: number;
+  cpa: number;
+  spendShare: number;
+}
+
+interface DemoCell {
+  age: string;
+  gender: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  cv: number;
+  cpa: number;
+}
+
+interface HeatmapCell {
+  day: number;
+  hour: number;
+  spend: number;
+  cv: number;
+  cpa: number;
+}
+
+interface BreakdownRow extends MetaBreakdownInsights {
+  cv?: number;
+  cpa?: number;
 }
 
 function formatCurrency(value: number): string {
@@ -54,6 +110,30 @@ function feeLabel(method: FeeCalcMethod): string {
   return method === "margin" ? "Fee込(内掛)" : "Fee込(外掛)";
 }
 
+function parseHourRange(value: string | undefined): number {
+  const match = value?.match(/^(\d{2}):/);
+  return match ? Number(match[1]) : 0;
+}
+
+function weekdayToMondayIndex(date: string): number {
+  const raw = new Date(date).getDay();
+  return raw === 0 ? 6 : raw - 1;
+}
+
+async function fetchJsonOrEmpty<T>(url: string, fallback: T): Promise<T> {
+  try {
+    const response = await apiFetch(url);
+    if (!response.ok) {
+      console.error(`API request failed: ${url}`, response.status);
+      return fallback;
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    console.error(`API request error: ${url}`, error);
+    return fallback;
+  }
+}
+
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>("last_30");
   const [loading, setLoading] = useState(true);
@@ -62,6 +142,10 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [daily, setDaily] = useState<DailyRow[]>([]);
   const [creatives, setCreatives] = useState<MetaCreativeSummary[]>([]);
+  const [deviceData, setDeviceData] = useState<DeviceData[]>([]);
+  const [campaignsData, setCampaignsData] = useState<CampaignSummaryData[]>([]);
+  const [demographicData, setDemographicData] = useState<DemoCell[]>([]);
+  const [heatmapData, setHeatmapData] = useState<HeatmapCell[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
   useEffect(() => {
@@ -75,10 +159,10 @@ export default function DashboardPage() {
     const run = async () => {
       setLoading(true);
       setError("");
+
       const keys = loadApiKeys();
       const companies = loadCompanies();
       if (companies.length === 0 && keys.length === 0) {
-        // localStorage未設定でもサーバー側env変数があればOK
         try {
           const envRes = await fetch("/api/meta/check-env");
           const envData = (await envRes.json()) as { configured: boolean };
@@ -88,6 +172,10 @@ export default function DashboardPage() {
             setProjects([]);
             setDaily([]);
             setCreatives([]);
+            setDeviceData([]);
+            setCampaignsData([]);
+            setDemographicData([]);
+            setHeatmapData([]);
             setLoading(false);
             return;
           }
@@ -98,34 +186,95 @@ export default function DashboardPage() {
           return;
         }
       }
+
       setSetupMissing(false);
+
       try {
-        const [projectRes, dailyRes, creativeRes] = await Promise.all([
-          apiFetch(`/api/meta/projects?date_preset=${datePreset}`),
-          apiFetch(`/api/meta/daily?date_preset=${datePreset}`),
-          apiFetch(`/api/meta/creatives?date_preset=${datePreset}`),
+        const [projectData, dailyData, creativeData, deviceRaw, campaignRaw, demographicRaw, hourlyRaw] = await Promise.all([
+          fetchJsonOrEmpty<ProjectRow[]>(`/api/meta/projects?date_preset=${datePreset}`, []),
+          fetchJsonOrEmpty<DailyRow[]>(`/api/meta/daily?date_preset=${datePreset}`, []),
+          fetchJsonOrEmpty<MetaCreativeSummary[]>(`/api/meta/creatives?date_preset=${datePreset}`, []),
+          fetchJsonOrEmpty<BreakdownRow[]>(`/api/meta/breakdowns?dimension=impression_device&date_preset=${datePreset}`, []),
+          fetchJsonOrEmpty<CampaignApiRow[]>(`/api/meta/campaigns?date_preset=${datePreset}`, []),
+          fetchJsonOrEmpty<BreakdownRow[]>(`/api/meta/breakdowns?dimension=age,gender&date_preset=${datePreset}`, []),
+          fetchJsonOrEmpty<BreakdownRow[]>(
+            `/api/meta/breakdowns?dimension=hourly_stats_aggregated_by_advertiser_time_zone&date_preset=${datePreset}`,
+            [],
+          ),
         ]);
 
-        if (!projectRes.ok || !dailyRes.ok || !creativeRes.ok) {
-          throw new Error("ダッシュボードデータの取得に失敗しました");
-        }
+        const deviceNormalized = deviceRaw.map((row) => ({
+          device: row.impression_device || "unknown",
+          spend: toNumber(row.spend),
+          impressions: toNumber(row.impressions),
+          clicks: toNumber(row.clicks),
+          cv: Number(row.cv) || 0,
+          cpa: Number(row.cpa) || 0,
+          ctr: toNumber(row.ctr),
+        }));
 
-        const [projectData, dailyData, creativeData] = await Promise.all([
-          projectRes.json() as Promise<ProjectRow[]>,
-          dailyRes.json() as Promise<DailyRow[]>,
-          creativeRes.json() as Promise<MetaCreativeSummary[]>,
-        ]);
+        const totalCampaignSpend = campaignRaw.reduce((sum, row) => sum + toNumber(row.spend), 0);
+        const campaignNormalized = campaignRaw
+          .map((row) => {
+            const spend = toNumber(row.spend);
+            const impressions = toNumber(row.impressions);
+            const clicks = toNumber(row.clicks);
+            const cv = Number(row.cv) || 0;
+            return {
+              campaign_id: row.campaign_id,
+              campaign_name: row.campaign_name || "名称未設定",
+              spend,
+              impressions,
+              clicks,
+              ctr: toNumber(row.ctr),
+              cv,
+              cpa: Number(row.cpa) || (cv > 0 ? spend / cv : 0),
+              spendShare: totalCampaignSpend > 0 ? (spend / totalCampaignSpend) * 100 : 0,
+            };
+          })
+          .sort((a, b) => b.spend - a.spend)
+          .slice(0, 10);
+
+        const demographicNormalized = demographicRaw.map((row) => ({
+          age: row.age || "unknown",
+          gender: row.gender || "unknown",
+          spend: toNumber(row.spend),
+          impressions: toNumber(row.impressions),
+          clicks: toNumber(row.clicks),
+          cv: Number(row.cv) || 0,
+          cpa: Number(row.cpa) || 0,
+        }));
+
+        const hourlyMap = new Map<string, HeatmapCell>();
+        hourlyRaw.forEach((row) => {
+          const day = weekdayToMondayIndex(row.date_start);
+          const hour = parseHourRange(row.hourly_stats_aggregated_by_advertiser_time_zone);
+          const key = `${day}:${hour}`;
+          const current = hourlyMap.get(key) ?? { day, hour, spend: 0, cv: 0, cpa: 0 };
+          current.spend += toNumber(row.spend);
+          current.cv += Number(row.cv) || 0;
+          current.cpa = current.cv > 0 ? current.spend / current.cv : 0;
+          hourlyMap.set(key, current);
+        });
 
         if (!mounted) return;
-        setProjects(Array.isArray(projectData) ? projectData : []);
-        setDaily(Array.isArray(dailyData) ? dailyData : []);
-        setCreatives(Array.isArray(creativeData) ? creativeData : []);
+        setProjects(projectData);
+        setDaily(dailyData);
+        setCreatives(creativeData);
+        setDeviceData(deviceNormalized);
+        setCampaignsData(campaignNormalized);
+        setDemographicData(demographicNormalized);
+        setHeatmapData(Array.from(hourlyMap.values()));
       } catch (err) {
         if (!mounted) return;
         setError(err instanceof Error ? err.message : "データ取得エラー");
         setProjects([]);
         setDaily([]);
         setCreatives([]);
+        setDeviceData([]);
+        setCampaignsData([]);
+        setDemographicData([]);
+        setHeatmapData([]);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -166,7 +315,7 @@ export default function DashboardPage() {
             : progress.paceStatus === "over"
               ? ("paused" as const)
               : ("active" as const),
-      } as ClientRow;
+      } satisfies ClientRow;
     });
   }, [projects, settings]);
 
@@ -176,18 +325,40 @@ export default function DashboardPage() {
     const totalCv = projectRows.reduce((sum, row) => sum + row.cv, 0);
     const avgCpa = totalCv > 0 ? totalSpend / totalCv : 0;
     const avgRoas = projectRows.length > 0 ? projectRows.reduce((sum, row) => sum + row.roas, 0) / projectRows.length : 0;
+    const totalImpressions = projects.reduce((sum, row) => sum + row.impressions, 0);
+    const totalClicks = projects.reduce((sum, row) => sum + row.clicks, 0);
+    const totalCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+    const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
 
     const series = [...daily]
-      .map((row) => ({ date: row.date_start, spend: toNumber(row.spend), cv: row.cv ?? 0 }))
+      .map((row) => {
+        const spend = toNumber(row.spend);
+        const impressions = toNumber(row.impressions);
+        const clicks = toNumber(row.clicks);
+        const cv = Number(row.cv) || 0;
+        return {
+          date: row.date_start,
+          spend,
+          cv,
+          cpa: cv > 0 ? spend / cv : 0,
+          impressions,
+          clicks,
+          ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        };
+      })
       .sort((a, b) => a.date.localeCompare(b.date))
       .filter((row) => row.spend >= 0);
+
     const split = Math.max(1, Math.floor(series.length / 2));
     const prevRows = series.slice(0, split);
-
     const prevSpend = prevRows.reduce((sum, row) => sum + row.spend, 0);
     const prevCv = prevRows.reduce((sum, row) => sum + row.cv, 0);
     const prevCpa = prevCv > 0 ? prevSpend / prevCv : 0;
     const prevRoas = prevSpend > 0 ? (prevCv * 10000) / prevSpend : 0;
+    const prevImpressions = prevRows.reduce((sum, row) => sum + row.impressions, 0);
+    const prevClicks = prevRows.reduce((sum, row) => sum + row.clicks, 0);
+    const prevCtr = prevImpressions > 0 ? (prevClicks / prevImpressions) * 100 : 0;
+    const prevCpc = prevClicks > 0 ? prevSpend / prevClicks : 0;
 
     return [
       {
@@ -201,19 +372,28 @@ export default function DashboardPage() {
       { label: "総CV数", value: totalCv, previous: prevCv, type: "number" },
       { label: "平均CPA", value: avgCpa, previous: prevCpa, type: "currency", inverted: true },
       { label: "平均ROAS", value: avgRoas, previous: prevRoas, type: "roas" },
+      { label: "表示回数", value: totalImpressions, previous: prevImpressions, type: "number" },
+      { label: "クリック数", value: totalClicks, previous: prevClicks, type: "number" },
+      { label: "CTR", value: totalCtr, previous: prevCtr, type: "percent" },
+      { label: "CPC", value: avgCpc, previous: prevCpc, type: "currency", inverted: true },
     ] satisfies KpiMetric[];
-  }, [projectRows, daily, settings]);
+  }, [projectRows, projects, daily, settings]);
 
   const trendRows = useMemo(() => {
     return daily
       .map((row) => {
         const spend = toNumber(row.spend);
-        const cv = row.cv ?? 0;
+        const impressions = toNumber(row.impressions);
+        const clicks = toNumber(row.clicks);
+        const cv = Number(row.cv) || 0;
         return {
           date: row.date_start,
           spend,
           cv,
           cpa: cv > 0 ? spend / cv : 0,
+          impressions,
+          clicks,
+          ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
         } satisfies TrendRow;
       })
       .sort((a, b) => a.date.localeCompare(b.date));
@@ -231,7 +411,7 @@ export default function DashboardPage() {
       daily.map((row) => ({
         date_start: row.date_start,
         spend: toNumber(row.spend),
-        cv: row.cv ?? 0,
+        cv: Number(row.cv) || 0,
         impressions: toNumber(row.impressions),
         clicks: toNumber(row.clicks),
       })),
@@ -250,8 +430,15 @@ export default function DashboardPage() {
       title: row.title,
       message: row.message,
       projectName: row.projectName,
-    })) as AlertItem[];
+    })) satisfies AlertItem[];
   }, [projects, daily, creatives, settings]);
+
+  const averageCampaignCpa = useMemo(() => {
+    if (campaignsData.length === 0) return undefined;
+    const totalCv = campaignsData.reduce((sum, row) => sum + row.cv, 0);
+    const totalSpend = campaignsData.reduce((sum, row) => sum + row.spend, 0);
+    return totalCv > 0 ? totalSpend / totalCv : undefined;
+  }, [campaignsData]);
 
   if (loading) {
     return (
@@ -288,9 +475,7 @@ export default function DashboardPage() {
       {setupMissing ? (
         <section className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 p-6 text-center">
           <h3 className="text-lg font-semibold text-amber-800">初期設定が必要です</h3>
-          <p className="mt-2 text-sm text-amber-700">
-            広告データを表示するには、APIキーと案件の登録が必要です。
-          </p>
+          <p className="mt-2 text-sm text-amber-700">広告データを表示するには、APIキーと案件の登録が必要です。</p>
           <div className="mt-4 flex justify-center gap-3">
             <Link
               href="/settings/api-keys"
@@ -312,7 +497,14 @@ export default function DashboardPage() {
 
           <BigKpiCards metrics={metrics} />
           <ClientTable rows={projectRows} />
+          <CampaignSummaryTable campaigns={campaignsData} targetCpa={averageCampaignCpa} />
           <DailyTrendChart rows={trendRows} />
+          <DeviceBreakdown data={deviceData} />
+          <section className="space-y-6">
+            <h3 className="text-lg font-semibold text-[#1a365d]">詳細分析</h3>
+            <DemographicBreakdown data={demographicData} />
+            <TimeHeatmap data={heatmapData} />
+          </section>
         </>
       )}
     </div>

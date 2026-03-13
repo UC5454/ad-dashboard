@@ -12,6 +12,9 @@ const ALLOWED_BREAKDOWNS = new Set([
   "publisher_platform",
   "platform_position",
   "impression_device",
+  "age,gender",
+  "region",
+  "hourly_stats_aggregated_by_advertiser_time_zone",
 ]);
 
 export async function GET(request: NextRequest) {
